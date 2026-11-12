@@ -2,7 +2,7 @@
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
-Status: **M0 done (2026-11-12)**: workspace skeleton builds, hello window runs. Next: M1.
+Status: **M0 and M1 done (2026-11-12)**, apart from sending the pair request, which moves to M2 with the Trust screen. Next: M2.
 
 ---
 
@@ -66,10 +66,12 @@ You asked what the "p2p" connection can do. It's actually two protocols. Both we
 - ✔ In Recently Deleted: `ZTRASHEDSTATE = 1`. **Hidden by default.**
 - ✔ Capture date: `ZDATECREATED` (seconds since 2001-01-01 UTC), with time-zone offset from `ZADDITIONALASSETATTRIBUTES.ZTIMEZONEOFFSET`
 - ✔ Edited: a `PhotoData/Mutations/DCIM/<dir>/<stem>/Adjustments/FullSizeRender.{heic,jpg,mov}` file exists
-- ✔ Live Photo: a `.MOV` with the same name stem as the photo
-- To check: photo vs video (`ZKIND`), size in pixels (`ZWIDTH`/`ZHEIGHT`), video length (`ZDURATION`), favourite (`ZFAVORITE`), location (`ZLATITUDE`/`ZLONGITUDE`), hidden (`ZHIDDEN`)
+- ✔ Live Photo: a `.MOV` with the same name stem as the photo, and `ZKINDSUBTYPE = 2` on the photo's row. The clip has no row of its own.
+- ✔ (iOS 27, 2026-11-12) photo vs video: `ZKIND` 0/1. Size in pixels: `ZWIDTH`/`ZHEIGHT`. Video length: `ZDURATION`. Favourite: `ZFAVORITE`. Hidden: `ZHIDDEN`. Location: `ZLATITUDE`/`ZLONGITUDE`, where **-180 means no location**, not NULL. Time zone: `ZADDITIONALASSETATTRIBUTES.ZTIMEZONEOFFSET` (seconds) joined on `ZASSET`. Original size: `ZADDITIONALASSETATTRIBUTES.ZORIGINALFILESIZE`. `ZKINDSUBTYPE = 10` looks like screenshots.
+- ✔ Edited: `ZADJUSTMENTTIMESTAMP` is set exactly for the items that have a `Mutations/` folder (every one checked).
+- ✔ `DCIM/` holds more files than the database has rows: on the test phone the extra files were exactly the Live Photo `.MOV` clips and the `.AAE` edit sidecars. Every row has a file.
 
-The database is optional. If it can't be read, fall back to plain `DCIM/` browsing with file dates.
+The database is optional. If it can't be read, fall back to plain `DCIM/` browsing with file dates. On the test phone the fallback found the same items and the same Live Photos as the database (checked in M1), but it can't tell which items are in Recently Deleted.
 
 ## 4. Technology
 
@@ -120,7 +122,11 @@ The app always shows exactly one clear next step. Each state is detected, not gu
 
 **During a copy:** if the phone locks or the cable drops, AFC returns I/O errors. Seen on 2026-10-19. The queue then **pauses** and shows "Unlock your iPhone / reconnect". It doesn't record a pile of failures. When the device comes back, the queue resumes from where it stopped.
 
-**Tip shown once:** set Auto-Lock to Never during long transfers.
+**Locked phone (tested 2026-11-12):** once the phone is trusted and has been unlocked at least once since it started, AFC keeps working while it's locked. Listing, reading a HEIC and reading `Photos.sqlite` all succeeded. So "Unlock your iPhone" is only shown when the phone actually refuses: before the first unlock after a restart, or while waiting for Trust. The app shouldn't nag about the lock screen otherwise. It's not yet known whether the 2026-10-19 I/O errors came from auto-lock or from a bad cable like the one seen today. **M4 must test a long copy with the phone locked.** Until then, the queue keeps pausing on disconnect.
+
+**Tip shown once:** set Auto-Lock to Never during long transfers (drop it if the M4 test shows locking doesn't matter).
+
+**Bad cable / port signature (seen 2026-11-12):** usbmuxd attaches the device for about a second and then logs "Removed device". After that the kernel logs `device descriptor read/64, error -71` and `unable to enumerate USB device`, and `lsusb` no longer lists Apple (`05ac`). This is a physical link problem, so the app should show "Try another cable or USB port (no hubs)", not the pairing screen. Detect it from a device that appears and disappears within a few seconds.
 
 ## 6. Interface
 

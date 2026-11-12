@@ -11,3 +11,7 @@ publish.workspace = true
 # Pure-Rust usbmuxd/lockdown/AFC client. `ring` instead of the default aws-lc
 # for a simpler build. Needs the system usbmuxd daemon at runtime.
 idevice = { version = "=0.1.68", default-features = false, features = ["ring", "usbmuxd", "pair", "afc", "device_info", "diagnostics_relay"] }
+plist = "1.8"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util"] }

@@ -10,3 +10,5 @@ publish.workspace = true
 [dependencies]
 unspool-device.workspace = true
 unspool-library.workspace = true
+
+tokio = { version = "1", features = ["rt", "macros"] }
