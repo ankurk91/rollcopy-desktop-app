@@ -1,0 +1,11 @@
+# Normalise line endings; scripts must stay LF.
+* text=auto eol=lf
+*.sh text eol=lf
+
+*.svg text
+*.png binary
+*.jpg binary
+*.ico binary
+
+# Generated
+Cargo.lock linguist-generated=true -diff

@@ -1,0 +1,82 @@
+name: Release
+
+# Push a semver tag like v0.1.0 to build packages and create a DRAFT release.
+# Review the draft on GitHub and publish it by hand; "Check for updates"
+# only sees published releases. Run manually to just build the packages.
+on:
+  push:
+    tags:
+      # GitHub tag filters are globs, not regex: this matches vMAJOR.MINOR.PATCH
+      # only (e.g. v0.1.0, v1.12.3). The first step checks it with a regex too.
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    name: .deb + AppImage (Ubuntu 24.04, amd64)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Check the tag is semver and matches Cargo.toml
+        if: github.ref_type == 'tag'
+        run: |
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version" >&2
+            exit 1
+          fi
+
+      - name: Install system packages
+        run: packaging/ci-deps.sh
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      - name: Build the release binary
+        run: cargo build --release -p unspool-app
+
+      - name: Build the .deb package
+        run: |
+          cargo install cargo-deb --version 3.8.0 --locked
+          cargo deb -p unspool-app --no-build
+          mkdir -p dist
+          cp target/debian/*.deb dist/
+
+      - name: Build the AppImage
+        run: packaging/build-appimage.sh
+
+      - name: Write SHA256 checksums
+        working-directory: dist
+        run: sha256sum *.deb *.AppImage | tee SHA256SUMS
+
+      - name: Upload packages as a workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: unspool-packages
+          path: dist/*
+
+      - name: Create a draft GitHub release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          generate_release_notes: true
+          files: dist/*

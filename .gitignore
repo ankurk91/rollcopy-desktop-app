@@ -1,2 +1,25 @@
-/target
+# Build output
+/target/
+/dist/
+/AppDir/
+*.AppImage
+*.deb
+
+# Unspool working files
 *.part
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Never commit media or databases from a phone
+*.heic
+*.HEIC
+*.mov
+*.MOV
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

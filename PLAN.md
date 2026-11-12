@@ -2,7 +2,7 @@
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
-Status: **M0–M6 done (2026-11-12).** Next: M7 (polish, first GitHub release, packaging).
+Status: **M0–M6 done. M7 in progress**: CI and release workflows, `.deb` (cargo-deb 3.8.0) and AppImage (linuxdeploy `1-alpha-20251107-1`, checksummed) build locally; README, AGENTS.md and repo hygiene files added; personal details scrubbed from the tree. Before going public: rewrite git history (older commits still contain personal details), then tag v0.1.0.
 
 ---
 
@@ -367,6 +367,8 @@ The device, library, convert and queue crates have no UI dependency, so they can
 | M5 | Preferences window + saved config, ☰ app menu, About dialog, GitHub links, Check for updates | Preferences survive a restart; update check handles newer / same / 404 / offline |
 | M6 | Tray icon, notifications, `.desktop` file | Shows in Cinnamon's tray and app menu |
 | M7 | Polish: keyboard shortcuts, empty states, first GitHub release + packaging | Check for updates finds that release |
+
+**Release pipeline (M7):** `.github/workflows/ci.yml` (fmt, clippy `-D warnings`, tests on `ubuntu-24.04`, amd64) on pushes to main and on PRs. `.github/workflows/release.yml` runs on tags `vMAJOR.MINOR.PATCH` (glob filter plus a regex check, and the tag must equal the Cargo.toml version), or by hand. It builds the `.deb` and AppImage with SHA256SUMS, uploads them as an artifact, and for tags creates a **draft** release, which is published by hand. Targets: Ubuntu 24.04+ (glibc 2.39), amd64 only. The AppImage needs `usbmuxd` and `ffmpeg` on the host; the `.deb` depends on them.
 
 ## 13. System setup
 

@@ -1,5 +1,6 @@
 [package]
 name = "unspool-app"
+description = "Copy photos and videos from an iPhone to Linux over USB"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -33,3 +34,25 @@ zbus = { version = "5.19", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+# `cargo deb -p unspool-app` (cargo-deb 3.8) → target/debian/unspool_<ver>-1_amd64.deb
+[package.metadata.deb]
+name = "unspool"
+maintainer = "ankurk91 <6111524+ankurk91@users.noreply.github.com>"
+copyright = "2026 ankurk91"
+license-file = ["../../LICENSE", "0"]
+extended-description = """\
+Plug in your iPhone, pick photos and videos, and get Android/PC-friendly \
+files: HEIC becomes JPG and MOV becomes MP4, arranged by date. Read-only \
+towards the phone."""
+section = "graphics"
+priority = "optional"
+# $auto adds the shared libraries the binary links (e.g. libde265).
+depends = "$auto, usbmuxd, ffmpeg"
+assets = [
+    ["target/release/unspool", "usr/bin/", "755"],
+    ["../../packaging/dev.unspool.Unspool.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/icons/dev.unspool.Unspool.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["../../README.md", "usr/share/doc/unspool/README.md", "644"],
+]
+
