@@ -46,7 +46,6 @@ impl MainView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = cx.theme().clone();
         if self.counts_dirty {
             self.recount();
         }
@@ -57,14 +56,7 @@ impl MainView {
 
         let header = self.render_grid_header(cx).into_any_element();
         let body = if self.visible.is_empty() {
-            div()
-                .flex_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(theme.muted_foreground)
-                .child("Nothing here with this filter.")
-                .into_any_element()
+            self.render_empty(cx)
         } else {
             div()
                 .relative()
@@ -471,7 +463,7 @@ impl MainView {
         self.preview_open = true;
         self.status = None;
         if clicks >= 2 {
-            self.open_focused();
+            self.activate_focused();
             return;
         }
         let key = self.assets()[idx].device_path();
@@ -586,4 +578,70 @@ fn sync_chip(
             window.focus(&this.focus, cx);
             cx.notify();
         }))
+}
+
+impl MainView {
+    /// Why the grid is empty, and the one action that helps.
+    fn render_empty(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let filtered = self.filter != Filter::All || self.sync_filter != SyncFilter::All;
+        let library_empty = !self.assets().iter().any(|a| !a.trashed);
+        let (icon, title, body): (IconName, &str, String) = if library_empty {
+            (
+                IconName::Images,
+                "No photos or videos on this iPhone",
+                "Take a photo, or check that Photos isn't still syncing from iCloud.".into(),
+            )
+        } else if filtered {
+            let what = match (self.filter, self.sync_filter) {
+                (_, SyncFilter::Copied) => "Nothing here has been copied yet.",
+                (_, SyncFilter::NotCopied) => "Everything here is already copied.",
+                (Filter::Photos, _) => "No photos here.",
+                (Filter::Videos, _) => "No videos here.",
+                (Filter::Edited, _) => "No edited items here.",
+                (Filter::All, SyncFilter::All) => "Nothing here.",
+            };
+            (
+                IconName::Images,
+                what,
+                "Clear the filters to see everything.".into(),
+            )
+        } else if self.selection == Selection::RecentlyDeleted {
+            (IconName::Trash, "Recently Deleted is empty", String::new())
+        } else {
+            (IconName::Images, "Nothing here", String::new())
+        };
+        v_flex()
+            .flex_1()
+            .items_center()
+            .justify_center()
+            .gap_3()
+            .p_8()
+            .child(crate::viewer::big_icon(icon, theme.muted_foreground))
+            .child(
+                div()
+                    .text_lg()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title.to_owned()),
+            )
+            .when(!body.is_empty(), |d| {
+                d.child(div().text_color(theme.muted_foreground).child(body))
+            })
+            .when(filtered && !library_empty, |d| {
+                d.child(
+                    btn("clear-filters")
+                        .small()
+                        .outline()
+                        .label("Show everything")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.filter = Filter::All;
+                            this.sync_filter = SyncFilter::All;
+                            this.recompute_visible();
+                            window.focus(&this.focus, cx);
+                            cx.notify();
+                        })),
+                )
+            })
+            .into_any_element()
+    }
 }

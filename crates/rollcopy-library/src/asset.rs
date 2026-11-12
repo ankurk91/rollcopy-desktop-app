@@ -35,6 +35,9 @@ pub struct Asset {
     /// Device path of the edited version (`.../Adjustments/FullSizeRender.*`),
     /// if the item was edited on the phone.
     pub edited_render: Option<String>,
+    /// When the item was last edited on the phone (Unix seconds), from the
+    /// Photos DB. Changes on every edit, so caches can key on it.
+    pub edited_at: Option<i64>,
     /// Where the item came from, from the app that saved it: "Camera",
     /// "Snapchat", "WhatsApp", "Screenshots", … (Photos DB only).
     pub source_app: Option<String>,
@@ -67,6 +70,7 @@ impl Asset {
             location: None,
             original_size: None,
             edited_render: None,
+            edited_at: None,
             source_app: None,
             camera: None,
             lens: None,

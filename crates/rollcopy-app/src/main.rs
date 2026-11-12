@@ -14,6 +14,7 @@ mod tray;
 mod tree;
 mod update;
 mod view;
+mod viewer;
 mod worker;
 
 use std::borrow::Cow;
@@ -35,6 +36,7 @@ gpui_kit_assets::icon_assets!(
         Battery,
         BatteryCharging,
         ChevronDown,
+        ChevronLeft,
         ChevronRight,
         Copy,
         FolderCheck,
@@ -43,6 +45,7 @@ gpui_kit_assets::icon_assets!(
         Moon,
         Sun,
         SunMoon,
+        Trash,
         X,
         Image,
         Images,
@@ -60,14 +63,14 @@ gpui_kit_assets::icon_assets!(
     ]
 );
 
-/// Lucide icons plus the app icon (Tabler `device-mobile-down`, MIT).
+/// Lucide icons plus the full-colour app icon (for the About dialog).
 struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if path == about::APP_ICON {
             return Ok(Some(Cow::Borrowed(include_bytes!(
-                "../../../assets/icons/device-mobile-down.svg"
+                "../../../packaging/icons/io.github.ankurk91.Rollcopy.svg"
             ))));
         }
         AppAssets.load(path)

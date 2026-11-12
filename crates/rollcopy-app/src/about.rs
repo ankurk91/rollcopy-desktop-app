@@ -11,8 +11,8 @@ use gpui_kit::*;
 use crate::prefs::Prefs;
 use crate::update::{self, UpdateCheck};
 use crate::view::{
-    CheckForUpdates, MainView, OpenPreferences, Quit, ReportIssue, ShowAbout, ViewOnGitHub, btn,
-    muted,
+    CheckForUpdates, MainView, OpenPreferences, Quit, ReportIssue, ShowAbout, ShowShortcuts,
+    ViewOnGitHub, btn, muted,
 };
 
 /// Path the app icon is served under (see `main.rs` asset source).
@@ -27,8 +27,27 @@ const CREDITS: &[(&str, &str)] = &[
     ("libheif", "LGPL-3.0"),
     ("libde265", "LGPL-3.0"),
     ("FFmpeg (run as a separate program)", "LGPL/GPL"),
-    ("Tabler Icons", "MIT"),
     ("Lucide icons", "ISC/MIT"),
+];
+
+/// Keyboard shortcuts (shown with F1 or ☰ → Keyboard Shortcuts; keep the
+/// README table in sync).
+pub(crate) const SHORTCUTS: &[(&str, &str)] = &[
+    ("← → ↑ ↓", "Move between items"),
+    ("Shift + arrows", "Extend the selection"),
+    (
+        "Click / Ctrl+click / Shift+click",
+        "Select / add to / extend the selection",
+    ),
+    ("Ctrl+A", "Select all items shown"),
+    ("Esc", "Clear the selection, or close the viewer"),
+    (
+        "Space / Enter / double-click",
+        "View the item full-window (videos: open the player)",
+    ),
+    ("Ctrl+,", "Preferences"),
+    ("F1", "This list"),
+    ("Ctrl+Q", "Quit"),
 ];
 
 /// State of the update dialog.
@@ -56,6 +75,7 @@ impl MainView {
                     .menu("View on GitHub", Box::new(ViewOnGitHub))
                     .menu("Report an Issue", Box::new(ReportIssue))
                     .separator()
+                    .menu("Keyboard Shortcuts", Box::new(ShowShortcuts))
                     .menu("About Rollcopy", Box::new(ShowAbout))
                     .menu("Quit", Box::new(Quit))
             })
@@ -158,7 +178,7 @@ impl MainView {
             .border_color(theme.border)
             .bg(theme.background)
             .shadow_lg()
-            .child(svg().path(APP_ICON).size(px(96.)).text_color(theme.primary))
+            .child(img(APP_ICON).size(px(96.)))
             .child(
                 div()
                     .text_xl()
@@ -268,6 +288,58 @@ impl MainView {
                 ),
             );
         Some(overlay("about-backdrop", card.into_any_element()))
+    }
+
+    pub(crate) fn render_shortcuts(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.shortcuts_open {
+            return None;
+        }
+        let theme = cx.theme().clone();
+        let card = v_flex()
+            .w(px(520.))
+            .p_5()
+            .gap_3()
+            .rounded_lg()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.background)
+            .shadow_lg()
+            .child(
+                div()
+                    .text_lg()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Keyboard shortcuts"),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .text_sm()
+                    .children(SHORTCUTS.iter().map(|(keys, what)| {
+                        h_flex()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .w(px(220.))
+                                    .flex_shrink_0()
+                                    .font_family("monospace")
+                                    .child(*keys),
+                            )
+                            .child(div().text_color(theme.muted_foreground).child(*what))
+                    })),
+            )
+            .child(
+                h_flex().justify_end().child(
+                    btn("shortcuts-close")
+                        .small()
+                        .primary()
+                        .label("Close")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.shortcuts_open = false;
+                            cx.notify();
+                        })),
+                ),
+            );
+        Some(overlay("shortcuts-backdrop", card.into_any_element()))
     }
 
     pub(crate) fn render_update_dialog(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

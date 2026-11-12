@@ -48,6 +48,7 @@ actions!(
         ViewOnGitHub,
         ReportIssue,
         ShowAbout,
+        ShowShortcuts,
         Quit,
     ]
 );
@@ -82,6 +83,7 @@ pub fn bind_keys(cx: &mut App) {
         // App-wide (PLAN §6 ☰ menu).
         KeyBinding::new("ctrl-,", OpenPreferences, None),
         KeyBinding::new("ctrl-q", Quit, None),
+        KeyBinding::new("f1", ShowShortcuts, None),
     ]);
 }
 
@@ -165,6 +167,10 @@ pub struct MainView {
     /// Asset index shown in the preview pane.
     pub(crate) focused: Option<usize>,
     pub(crate) thumbs: HashMap<String, Thumb>,
+    /// Full-window viewer showing the focused item.
+    pub(crate) viewer_open: bool,
+    /// Full-size photos for the viewer, by device path.
+    pub(crate) full: HashMap<String, crate::viewer::Full>,
     /// Items per filter chip for the current tree selection, cached so the
     /// header doesn't walk the whole library every frame.
     pub(crate) filter_counts: [usize; 4],
@@ -194,6 +200,7 @@ pub struct MainView {
     /// "Copies are still running" prompt on window close.
     pub(crate) quit_prompt: bool,
     pub(crate) about_open: bool,
+    pub(crate) shortcuts_open: bool,
     pub(crate) credits_open: bool,
     pub(crate) about_note: Option<String>,
     pub(crate) update_ui: Option<crate::about::UpdateUi>,
@@ -277,6 +284,8 @@ impl MainView {
             anchor: None,
             focused: None,
             thumbs: HashMap::new(),
+            viewer_open: false,
+            full: HashMap::new(),
             filter_counts: [0; 4],
             sync_filter: SyncFilter::All,
             sync_counts: [0; 3],
@@ -296,6 +305,7 @@ impl MainView {
             preview_open: false,
             quit_prompt: false,
             about_open: false,
+            shortcuts_open: false,
             credits_open: false,
             about_note: None,
             update_ui: None,
@@ -316,6 +326,13 @@ impl MainView {
     fn on_event(&mut self, ev: Event, window: &mut Window, cx: &mut Context<Self>) {
         match ev {
             Event::TrayAvailable(ok) => self.tray_available = ok,
+            Event::FullImage { key, result } => {
+                let state = match result {
+                    Ok(p) => crate::viewer::Full::Ready(p),
+                    Err(e) => crate::viewer::Full::Failed(e),
+                };
+                self.full.insert(key, state);
+            }
             Event::Tray(action) => self.on_tray_action(action, window, cx),
             Event::Phase(p) => {
                 eprintln!("phase: {}", phase_label(&p));
@@ -469,6 +486,12 @@ impl MainView {
     }
 
     fn clear_selection(&mut self, _: &ClearSelection, _: &mut Window, cx: &mut Context<Self>) {
+        // Esc closes the viewer first.
+        if self.viewer_open {
+            self.viewer_open = false;
+            cx.notify();
+            return;
+        }
         self.selected.clear();
         self.anchor = None;
         cx.notify();
@@ -869,6 +892,7 @@ impl Render for MainView {
         let transfers = self.render_transfers(cx);
         let conflict = self.render_conflict(cx);
         let toolbar = self.render_toolbar(cx).into_any_element();
+        let viewer = self.render_viewer(cx);
         let ready = matches!(self.library, LibState::Loaded { .. })
             && matches!(self.phase, Phase::Ready { .. });
         v_flex()
@@ -879,29 +903,45 @@ impl Render for MainView {
             .on_action(cx.listener(|this, _: &MoveLeft, _, cx| this.key_move(-1, false, cx)))
             .on_action(cx.listener(|this, _: &MoveRight, _, cx| this.key_move(1, false, cx)))
             .on_action(cx.listener(|this, _: &MoveUp, _, cx| {
+                if this.viewer_open {
+                    return;
+                }
                 let d = this.row_delta();
                 this.key_move(-d, false, cx)
             }))
             .on_action(cx.listener(|this, _: &MoveDown, _, cx| {
+                if this.viewer_open {
+                    return;
+                }
                 let d = this.row_delta();
                 this.key_move(d, false, cx)
             }))
             .on_action(cx.listener(|this, _: &ExtendLeft, _, cx| this.key_move(-1, true, cx)))
             .on_action(cx.listener(|this, _: &ExtendRight, _, cx| this.key_move(1, true, cx)))
             .on_action(cx.listener(|this, _: &ExtendUp, _, cx| {
+                if this.viewer_open {
+                    return;
+                }
                 let d = this.row_delta();
                 this.key_move(-d, true, cx)
             }))
             .on_action(cx.listener(|this, _: &ExtendDown, _, cx| {
+                if this.viewer_open {
+                    return;
+                }
                 let d = this.row_delta();
                 this.key_move(d, true, cx)
             }))
             .on_action(cx.listener(|this, _: &OpenItem, _, cx| {
-                this.open_focused();
+                this.activate_focused();
                 cx.notify();
             }))
             .on_drag_move(cx.listener(Self::resize_preview))
             .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
+            .on_action(cx.listener(|this, _: &ShowShortcuts, _, cx| {
+                this.shortcuts_open = true;
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &ShowAbout, _, cx| {
                 this.about_open = true;
                 this.about_note = None;
@@ -939,7 +979,9 @@ impl Render for MainView {
             )
             .children(transfers)
             .children(conflict)
+            .children(viewer)
             .children(self.render_about(cx))
+            .children(self.render_shortcuts(cx))
             .children(self.render_update_dialog(cx))
             .children(self.render_quit_prompt(cx))
     }

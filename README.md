@@ -94,9 +94,10 @@ packaging/install-local.sh --uninstall
 |---|---|
 | ← → ↑ ↓ | Move between items |
 | Shift + arrows | Extend the selection |
-| Space / Enter | Open the item in the system viewer or player |
-| Ctrl+A / Esc | Select all / clear the selection |
+| Ctrl+A / Esc | Select all / clear the selection (Esc also closes the viewer) |
+| Space / Enter / double-click | View the photo full-window (videos open in your player) |
 | Ctrl+, | Preferences |
+| F1 | Keyboard shortcuts |
 | Ctrl+Q | Quit |
 
 ## Troubleshooting
@@ -163,7 +164,7 @@ packaging/build-appimage.sh                   # AppImage
 ```
 
 The workspace is split into headless crates (device access, Photos library, conversion, copy queue)
-and the gpui app. [PLAN.md](PLAN.md) has the design, decisions and what was learned about iOS along
+and the gpui app. [docs/PLAN.md](docs/PLAN.md) has the design, decisions and what was learned about iOS along
 the way. AI coding agents: see [AGENTS.md](AGENTS.md).
 
 ## Licence
@@ -171,5 +172,4 @@ the way. AI coding agents: see [AGENTS.md](AGENTS.md).
 [MIT](LICENSE). Built with [gpui](https://github.com/zed-industries/zed) and
 [gpui-kit / gpui-component](https://github.com/longbridge/gpui-kit) (Apache-2.0),
 [idevice](https://crates.io/crates/idevice) (MIT), libheif and libde265 (LGPL-3.0), FFmpeg
-(run as a separate program), [Tabler Icons](https://tabler.io/icons) (MIT) and
-[Lucide](https://lucide.dev) icons (ISC).
+(run as a separate program) and [Lucide](https://lucide.dev) icons (ISC).

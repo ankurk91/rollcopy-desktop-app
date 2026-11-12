@@ -5,7 +5,7 @@ Notes for AI coding agents working on Rollcopy. Humans: see [README.md](README.m
 ## Project
 
 Linux desktop app (Rust, [gpui](https://github.com/zed-industries/zed) via `gpui-kit`) that copies photos and
-videos from an iPhone over USB. The plan, decisions and findings are in [PLAN.md](PLAN.md); read it first.
+videos from an iPhone over USB. The plan, decisions and findings are in [docs/PLAN.md](docs/PLAN.md); read it first.
 
 ```
 crates/rollcopy-device   usbmuxd/lockdown/AFC: listing, pairing, device info, read-only file access
@@ -38,4 +38,4 @@ System packages are listed in the README (Building from source).
   (`My iPhone`, `IMG_0001.HEIC`, `1 Example Street`).
 - Keep UI code thin; logic belongs in the headless crates with unit tests.
 - Pin `gpui-kit` exactly; gpui is pre-1.0.
-- Keep `PLAN.md` up to date when a decision or finding changes.
+- Keep `docs/PLAN.md` up to date when a decision or finding changes.

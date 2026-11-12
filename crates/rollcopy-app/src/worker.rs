@@ -33,6 +33,12 @@ pub enum Event {
         error: String,
     },
     Queue(QueueEvent),
+    /// A full-size image for the viewer is ready (or failed). `key` is the
+    /// asset's device path.
+    FullImage {
+        key: String,
+        result: Result<PathBuf, String>,
+    },
     /// Whether a tray host accepted the icon.
     TrayAvailable(bool),
     Tray(crate::tray::TrayAction),
@@ -52,6 +58,13 @@ pub enum Command {
         name: String,
     },
     Queue(QueueCommand),
+    /// Fetch a full-size photo for the viewer into `dest` (HEIC → JPG).
+    FullImage {
+        udid: String,
+        key: String,
+        source: String,
+        dest: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -83,13 +96,39 @@ impl CachePaths {
         self.root.join("db").join(udid)
     }
 
-    /// Local thumbnail for an asset: `thumbs/<udid>/<dir>/<file>.jpg`.
+    /// Local thumbnail for an asset: `thumbs/<udid>/<dir>/<file>.jpg`, or
+    /// `<file>.e<edit time>.jpg` for edited items, so editing a photo on the
+    /// phone after it was cached gives it a fresh thumbnail.
     pub fn thumb(&self, udid: &str, a: &Asset) -> PathBuf {
+        let name = if a.is_edited() {
+            format!("{}.e{}.jpg", a.filename, a.edited_at.unwrap_or(0))
+        } else {
+            format!("{}.jpg", a.filename)
+        };
         self.root
             .join("thumbs")
             .join(udid)
             .join(&a.directory)
-            .join(format!("{}.jpg", a.filename))
+            .join(name)
+    }
+
+    /// Full-size image for the viewer: `view/<udid>/<dir>/<file>[.e<edit>].<ext>`,
+    /// with HEIC stored as JPG. Cleared at startup.
+    pub fn view(&self, udid: &str, a: &Asset) -> PathBuf {
+        let plan = a.save_plan();
+        let ext = match plan.from_ext.as_str() {
+            "HEIC" | "HEIF" => "jpg".to_owned(),
+            other => other.to_ascii_lowercase(),
+        };
+        let name = match (a.is_edited(), a.edited_at) {
+            (true, t) => format!("{}.e{}.{ext}", a.stem(), t.unwrap_or(0)),
+            (false, _) => format!("{}.{ext}", a.stem()),
+        };
+        self.root
+            .join("view")
+            .join(udid)
+            .join(&a.directory)
+            .join(name)
     }
 
     pub fn open_dir(&self) -> PathBuf {
@@ -115,6 +154,8 @@ pub struct Worker {
 
 /// Starts the worker thread.
 pub fn spawn(paths: CachePaths) -> Worker {
+    // Full-size viewer images are only kept for one session.
+    let _ = std::fs::remove_dir_all(paths.root.join("view"));
     let (ev_tx, ev_rx) = async_channel::unbounded();
     let (cmd_tx, cmd_rx) = async_channel::unbounded();
     let (tray_tx, tray_rx) = async_channel::unbounded();
@@ -293,6 +334,21 @@ async fn serve_commands(
                         }
                     }
                 }
+                Command::FullImage {
+                    udid,
+                    key,
+                    source,
+                    dest,
+                } => {
+                    let tx = tx.clone();
+                    tokio::spawn(async move {
+                        let result = fetch_full(&udid, &source, &dest)
+                            .await
+                            .map(|()| dest)
+                            .map_err(|e| e.to_string());
+                        let _ = tx.send(Event::FullImage { key, result }).await;
+                    });
+                }
                 Command::Open {
                     udid,
                     device_path,
@@ -367,6 +423,41 @@ fn part_path(dest: &Path) -> PathBuf {
     let mut s = dest.as_os_str().to_owned();
     s.push(".part");
     PathBuf::from(s)
+}
+
+/// Copies a photo from the phone for the viewer, converting HEIC to JPG.
+async fn fetch_full(udid: &str, source: &str, dest: &Path) -> Result<(), DeviceError> {
+    if tokio::fs::try_exists(dest).await.unwrap_or(false) {
+        return Ok(());
+    }
+    if let Some(dir) = dest.parent() {
+        tokio::fs::create_dir_all(dir).await?;
+    }
+    let mut conn = None;
+    connect(&mut conn, udid).await?;
+    let fs = &mut conn.as_mut().expect("connected").fs;
+    let is_heic = source.to_ascii_lowercase().ends_with(".heic")
+        || source.to_ascii_lowercase().ends_with(".heif");
+    let part = part_path(dest);
+    if is_heic {
+        let raw = part_path(&part);
+        fs.copy_to_local(source, &raw, |_| {}).await?;
+        let (src, out) = (raw.clone(), part.clone());
+        let converted = tokio::task::spawn_blocking(move || {
+            rollcopy_convert::heic_to_jpeg(&src, &out, 90).map(|_| ())
+        })
+        .await;
+        let _ = tokio::fs::remove_file(&raw).await;
+        match converted {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(DeviceError::Other(e.to_string())),
+            Err(e) => return Err(DeviceError::Other(e.to_string())),
+        }
+    } else {
+        fs.copy_to_local(source, &part, |_| {}).await?;
+    }
+    tokio::fs::rename(&part, dest).await?;
+    Ok(())
 }
 
 async fn open_file(

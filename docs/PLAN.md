@@ -2,7 +2,7 @@
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
-Status: **M0–M6 done. M7 in progress**: CI and release workflows, `.deb` (cargo-deb 3.8.0) and AppImage (linuxdeploy `1-alpha-20251107-1`, checksummed) build locally; README, AGENTS.md and repo hygiene files added; personal details scrubbed from the tree. Before going public: rewrite git history (older commits still contain personal details), then tag v0.1.0.
+Status: **v0.1.0 released (2026-11-12). M0–M7 done**: Check for updates finds the release. Backlog for 0.1.x in §15.
 
 ---
 
@@ -308,7 +308,7 @@ A small modal opened from ☰ → About Rollcopy:
 ```
 
 - **Version** comes from `CARGO_PKG_VERSION`. The short git commit is added at build time by `build.rs`.
-- **Credits** expands to the libraries and assets used, with their licences: gpui, gpui-component, idevice, ksni, libheif, libde265, FFmpeg, Tabler Icons, Lucide icons (MIT, via gpui-kit-assets).
+- **Credits** expands to the libraries and assets used, with their licences: gpui, gpui-component, idevice, ksni, libheif, libde265, FFmpeg, Lucide icons (MIT, via gpui-kit-assets).
 - **Copy debug info** (in Credits) puts the app version, OS, desktop session, usbmuxd version and the connected iOS version on the clipboard, for bug reports.
 
 ## 8c. Check for updates
@@ -330,9 +330,8 @@ A small modal opened from ☰ → About Rollcopy:
 
 ## 9. Icon
 
-- Placeholder: **Tabler Icons `device-mobile-down`** (MIT, © Paweł Kuna). Saved in `assets/icons/` with its licence file.
-- As built in M6: `packaging/icons/io.github.ankurk91.Rollcopy.svg` is the glyph in white on a rounded blue square. It's used by the `.desktop` file and notifications, and is rasterised at runtime with `resvg` for the tray (22/32/48 px, plus a green/blue/red status dot). No build-time PNGs needed.
-- Replace it with a custom icon before any public release.
+- Since 0.1.1: a film roll unrolling into a download arrow, purple squircle (`packaging/icons/io.github.ankurk91.Rollcopy.svg`). It was designed as a raster image for the project and redrawn as a clean SVG, because the raster had no real transparency. Before 0.1.1 it was a Tabler `device-mobile-down` placeholder.
+- The same SVG is used by the `.desktop` file and notifications, and is rasterised at runtime with `resvg` for the tray (22/32/48 px, plus a green/blue/red status dot). No build-time PNGs needed.
 
 ## 10. Repo layout (planned)
 
@@ -345,9 +344,8 @@ rollcopy/
 │   ├── rollcopy-convert/  # HEIC→JPG, MOV→MP4, thumbnails
 │   ├── rollcopy-queue/    # transfer jobs, history db, retry
 │   └── rollcopy-app/      # gpui UI + ksni tray (binary: rollcopy)
-├── assets/icons/
 ├── packaging/            # .desktop file, app icon SVG, install-local.sh (~/.local, --uninstall); later .deb/AppImage
-└── PLAN.md
+└── docs/PLAN.md
 ```
 
 The device, library, convert and queue crates have no UI dependency, so they can be tested headless with a small CLI (`rollcopy-cli ls`, `rollcopy-cli info`).
@@ -401,3 +399,27 @@ The device, library, convert and queue crates have no UI dependency, so they can
 **Open questions for you**
 1. ~~GitHub repo URL~~: `github.com/ankurk91/rollcopy-desktop-app` (from the git remote).
 2. ~~App licence~~: **MIT** (decided 2026-11-12, `LICENSE` file in the repo root).
+
+## 15. Backlog after 0.1.0
+
+**0.1.1 polish**
+- Empty states: empty month/filter, empty transfer list, no Photos database.
+- Keyboard shortcuts list in the app (☰ menu).
+- In-app fullscreen viewer with ← / →.
+- Refresh cached thumbnails for items edited on the phone after caching.
+
+**Still to test**
+- Wayland session (only X11 tested so far) and GNOME (its tray needs the AppIndicator extension).
+- A long copy with the phone auto-locking.
+- Re-pairing after the phone forgets this computer (`InvalidHostID` path).
+- A second device (another iPhone, an iPad).
+
+**Speed**
+- H.264 option through VA-API (`tonemap_vaapi` + `h264_vaapi`).
+- Faster cold CI builds (a `ci` profile with unoptimised dependencies).
+
+**Reach**
+- Listings: AppImageHub, AlternativeTo, AUR; later Flathub (Flatpak needs access to the host's usbmuxd socket).
+- A landing page (GitHub Pages) and a repo social-preview image.
+- ~~Own app icon~~ (done for 0.1.1).
+

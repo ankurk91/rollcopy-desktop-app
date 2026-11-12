@@ -78,7 +78,7 @@ pub fn read_assets(db_path: &Path) -> Result<Vec<Asset>, DbError> {
         "SELECT a.ZDIRECTORY, a.ZFILENAME, {kind}, {subtype}, {date}, {tz}, {w}, {h}, {dur},
                 {fav}, {hidden}, {trashed}, {lat}, {lon}, {size},
                 a.Z_PK, {app}, {place}, {make}, {model}, {lens}, {iso}, {aperture},
-                {shutter}, {focal}
+                {shutter}, {focal}, {adjusted}
          FROM ZASSET a {join_clause} {ext_clause}
          WHERE a.ZDIRECTORY IS NOT NULL AND a.ZFILENAME IS NOT NULL
          ORDER BY {order}",
@@ -104,6 +104,7 @@ pub fn read_assets(db_path: &Path) -> Result<Vec<Asset>, DbError> {
         aperture = extc("ZAPERTURE"),
         shutter = extc("ZSHUTTERSPEED"),
         focal = extc("ZFOCALLENGTH"),
+        adjusted = col("ZADJUSTMENTTIMESTAMP"),
         ext_clause = if join_ext {
             "LEFT JOIN ZEXTENDEDATTRIBUTES e ON e.ZASSET = a.Z_PK"
         } else {
@@ -309,6 +310,9 @@ fn row_to_asset(r: &Row<'_>) -> rusqlite::Result<Option<(i64, Asset)>> {
         .get::<_, Option<String>>(20)?
         .filter(|s| !s.trim().is_empty());
     a.exposure = exposure_text(r.get(21)?, r.get(22)?, r.get(23)?, r.get(24)?);
+    a.edited_at = r
+        .get::<_, Option<f64>>(25)?
+        .map(|s| (s + APPLE_EPOCH_OFFSET) as i64);
     Ok(Some((pk, a)))
 }
 
@@ -443,6 +447,20 @@ mod tests {
             Some("1 Example Street, Springfield")
         );
         assert_eq!(place_from_archive(b"junk"), None);
+    }
+
+    #[test]
+    fn reads_edit_time() {
+        let d = db(
+            "CREATE TABLE ZASSET (Z_PK INTEGER PRIMARY KEY, ZDIRECTORY TEXT, ZFILENAME TEXT,
+                ZKIND INTEGER, ZADJUSTMENTTIMESTAMP REAL);",
+            "INSERT INTO ZASSET VALUES (1,'DCIM/100APPLE','IMG_1.HEIC',0,778377600),
+                (2,'DCIM/100APPLE','IMG_2.HEIC',0,NULL);",
+        );
+        let assets = read_assets(&d.path().join("Photos.sqlite")).unwrap();
+        // 778377600 s after 2001-01-01 = 2025-09-01T00:00:00Z = 1756684800.
+        assert_eq!(assets[0].edited_at, Some(1_756_684_800));
+        assert_eq!(assets[1].edited_at, None);
     }
 
     #[test]

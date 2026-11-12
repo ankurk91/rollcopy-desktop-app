@@ -1,19 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 24 24">
-  <!-- Rollcopy placeholder app icon: Tabler "device-mobile-down" (MIT, © Paweł Kuna)
-       in white on a rounded blue square. Replace before a public release (PLAN §9). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Rollcopy app icon: a film roll unrolling, with a download arrow.
+       Drawn as vector art after a design made for the project. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#4f8ff7"/>
-      <stop offset="1" stop-color="#2563eb"/>
+      <stop offset="0" stop-color="#5a0aa8"/>
+      <stop offset="1" stop-color="#3f018a"/>
     </linearGradient>
   </defs>
-  <rect x="1" y="1" width="22" height="22" rx="5" fill="url(#bg)"/>
-  <g transform="translate(3.6 3.6) scale(0.7)" fill="none" stroke="#ffffff"
-     stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12.5 21h-4.5a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v7"/>
-    <path d="M11 4h2"/>
-    <path d="M12 17v.01"/>
-    <path d="M19 16v6"/>
-    <path d="M22 19l-3 3l-3 -3"/>
+
+  <!-- Rounded-square background -->
+  <rect x="12" y="12" width="232" height="232" rx="56" fill="url(#bg)"/>
+
+  <!-- Film strip unrolling to the right (behind the roll) -->
+  <path fill="#dfcafb"
+        d="M 86 78
+           C 118 92, 152 60, 194 67
+           C 203 68, 208 75, 208 85
+           L 208 140
+           C 208 149, 199 151, 195 145
+           C 178 123, 148 125, 120 140
+           C 103 149, 92 156, 86 156 Z"/>
+
+  <!-- Frames in the strip -->
+  <g fill="#4a0398">
+    <rect x="93"  y="100" width="29" height="33" rx="6" transform="rotate(-7 107 116)"/>
+    <rect x="131" y="91"  width="27" height="32" rx="6" transform="rotate(-4 144 107)"/>
+    <rect x="166" y="89"  width="28" height="33" rx="6" transform="rotate(4 180 105)"/>
   </g>
+
+  <!-- The roll: cylinder body, shaded side, top face, core hole -->
+  <path fill="#d9c1fb" d="M 47 62 L 47 136 A 39 17 0 0 0 86 153 L 86 62 Z"/>
+  <path fill="#bf8ffa" d="M 47 62 L 47 136 C 47 143, 58 150, 71 152 L 71 72 C 58 70, 47 66, 47 62 Z"/>
+  <ellipse cx="86" cy="62" rx="39" ry="17" fill="#e6d4fd"/>
+  <ellipse cx="86" cy="62" rx="17" ry="7.5" fill="#4a0398"/>
+
+  <!-- Download arrow -->
+  <path fill="#f5eefc" stroke="#f5eefc" stroke-width="10" stroke-linejoin="round"
+        d="M 131 146 L 154 146 L 154 172 L 175 172 L 143 207 L 111 172 L 131 172 Z"/>
 </svg>
