@@ -18,5 +18,5 @@ gpui-kit.workspace = true
 async-channel = "2"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 directories = "6"
-tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "fs", "process"] }
 gpui-kit-assets = "=0.9.1"

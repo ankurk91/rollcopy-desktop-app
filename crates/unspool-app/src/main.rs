@@ -1,5 +1,7 @@
 //! Unspool desktop app (binary: `unspool`).
 
+mod grid;
+mod preview;
 mod tree;
 mod view;
 mod worker;
@@ -41,12 +43,14 @@ fn cache_dir() -> std::path::PathBuf {
 }
 
 fn main() {
-    let events = worker::spawn(cache_dir());
+    let paths = worker::CachePaths { root: cache_dir() };
+    let worker = worker::spawn(paths.clone());
 
     gpui_kit::application()
         .with_assets(AppAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            view::bind_keys(cx);
             cx.on_window_closed(|cx, _| cx.quit()).detach();
 
             let options = WindowOptions {
@@ -60,7 +64,7 @@ fn main() {
             };
             gpui_kit::open_window(options, cx, move |window, cx| {
                 Theme::sync_system_appearance(Some(window), cx);
-                cx.new(|cx| view::MainView::new(events, window, cx))
+                cx.new(|cx| view::MainView::new(worker, paths, window, cx))
             })
             .expect("failed to open window");
         });

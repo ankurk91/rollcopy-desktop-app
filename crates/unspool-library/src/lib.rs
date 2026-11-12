@@ -5,5 +5,5 @@ mod asset;
 mod load;
 pub mod photos_db;
 
-pub use asset::{Asset, MediaKind, kind_from_extension};
+pub use asset::{Asset, MediaKind, SavePlan, kind_from_extension};
 pub use load::{Library, Source, apply_edits, fetch_photos_db, load, scan_dcim, scan_edits};

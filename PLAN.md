@@ -2,7 +2,7 @@
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
-Status: **M0, M1 and M2 done (2026-11-12).** Next: M3 (thumbnail grid, filters, preview pane).
+Status: **M0, M1 and M2 done (2026-11-12). M3 built**, waiting for the smooth-scroll check on this laptop. Next: M4 (copy pipeline).
 
 ---
 
@@ -83,7 +83,7 @@ The database is optional. If it can't be read, fall back to plain `DCIM/` browsi
 | Photos DB | `rusqlite` (bundled SQLite) | |
 | HEIC → JPG | `libheif-rs` =3.0.0 with `default-features = false, features = ["v1_17"]` (needs `libheif-dev`) + `image` for JPEG encoding | Keeps EXIF data and applies rotation. |
 | MOV → MP4 | `ffmpeg` command-line tool, run as a subprocess | Lossless remux: `-c copy -tag:v hvc1 -movflags +faststart`. Optional H.264 re-encode setting. |
-| Video thumbnails | `ffmpeg -ss 1 -frames:v 1` | |
+| Thumbnails | **iOS's own** `PhotoData/Thumbnails/V2/<dir>/<file>/5005.JPG` (found in M3) | Present for every item on iOS 27, photos and videos: 480×360 for photos, 640×360 for videos, about 50–85 KB each. Copied once into the thumbnail cache. No HEIC decoding and no video copy is needed for the grid or the preview. Fallback when it's missing: a type icon. ffmpeg / libheif thumbnails only if a phone turns out not to have them. |
 | Tray icon | **ksni 0.3.x** (StatusNotifierItem over D-Bus) | gpui has no tray support. On Cinnamon the tray applet must be enabled. |
 | Preferences | `serde` + `toml` → `~/.config/unspool/config.toml` (path from the `directories` crate) | See §8a |
 | Job history | `rusqlite` → `~/.local/state/unspool/history.sqlite` | |
@@ -178,9 +178,13 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 **Centre pane: thumbnail grid**
 - Filter chips: All / Photos / Videos / Edited.
 - Badges on each tile: ▶ video with duration, ✎ edited, ◉ Live Photo, ✓ already in the current destination folder.
-- Selection: click, Ctrl+click, Shift+click, Ctrl+A.
+- Selection: click, Ctrl+click, Shift+click, Ctrl+A, Esc to clear.
+- Keyboard (added in M3 at the user's request): ← → ↑ ↓ move the focused item and update the preview, Shift+arrows extend the selection, Space / Enter open the item.
+- The preview pane is resizable by dragging its left edge (220 px minimum; the grid keeps at least one column). Its width isn't saved yet; that comes with `ui.toml` in M5.
 - Right-click menu: Copy, Copy folder, Show info.
-- Thumbnails are virtualised and lazy-loaded. A 5,000-item library must scroll smoothly.
+- Thumbnails are virtualised and lazy-loaded. A 5,000-item library must scroll smoothly. Only rows on screen are built, and only their thumbnails are requested, newest request first. `UNSPOOL_DEV_REPEAT=N` repeats the library N times to test this with a small phone.
+- Double-click a tile opens it like "Open" (the system viewer). In-app fullscreen with ← / → is not built yet.
+- Not handled yet: the cached thumbnail isn't refreshed if an item is edited on the phone after it was cached.
 
 **Right pane: preview and info**
 - Photos: a large preview. Double-click opens fullscreen with ← / → to step through.
@@ -212,6 +216,7 @@ These are the rules proven in the manual transfer, turned into code.
    - JPG / PNG / GIF / MP4 → copied byte for byte.
    - HEIC → JPG, quality 92, keeping EXIF and applying rotation.
    - MOV (HEVC) → MP4 by lossless remux. Preference: "Re-encode to H.264 for old devices" (off by default).
+   - **iPhone videos are HDR** (checked 2026-11-12): HEVC Main 10, HLG (`arib-std-b67`), BT.2020, Dolby Vision profile 8.4. Celluloid (mpv) on this laptop played one in **black and white**, while ffmpeg decodes it in full colour. A lossless remux keeps the HDR, so M4 must check that the MP4 plays correctly here. Try dropping the Dolby Vision metadata and keeping only the HLG layer. The H.264 option should also tone-map to SDR: `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p` gave correct colours.
    - Live Photos → **still only, always.** The motion clip is never copied. There's no setting for it.
 3. **Arrange the destination** as `<dest>/<YYYY>/<MM>/images|videos/<IMG_xxxx>.<ext>`, using the capture date in its own time zone. `<dest>` defaults to `~/Pictures/Unspool/<device name>/`. A flat-folder layout is available as a preference.
 4. **Write safely:** write to `<name>.part`, check it (size for straight copies; decodes for converted files), then rename. Set the file's modified time to the capture date. On overwrite, the old file is only replaced at the final rename, so a failed copy never destroys it.

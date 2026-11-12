@@ -92,6 +92,51 @@ impl Asset {
     }
 }
 
+/// What a copy of this asset produces (PLAN §7.1–7.2): the edited version
+/// if there is one, HEIC → JPG, MOV → MP4, everything else unchanged. Live
+/// Photos are copied as the still only, so they follow the photo rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavePlan {
+    /// Device path that will be read.
+    pub source: String,
+    /// Upper-case extension of `source` (`HEIC`).
+    pub from_ext: String,
+    /// Upper-case extension written (`JPG`).
+    pub to_ext: String,
+    pub uses_edited: bool,
+}
+
+impl SavePlan {
+    pub fn converts(&self) -> bool {
+        self.from_ext != self.to_ext
+    }
+}
+
+impl Asset {
+    pub fn save_plan(&self) -> SavePlan {
+        let source = self
+            .edited_render
+            .clone()
+            .unwrap_or_else(|| self.device_path());
+        let from_ext = source
+            .rsplit_once('.')
+            .map(|(_, e)| e.to_ascii_uppercase())
+            .unwrap_or_default();
+        let to_ext = match from_ext.as_str() {
+            "HEIC" | "HEIF" => "JPG".to_owned(),
+            "MOV" => "MP4".to_owned(),
+            "JPEG" => "JPG".to_owned(),
+            other => other.to_owned(),
+        };
+        SavePlan {
+            uses_edited: self.edited_render.is_some(),
+            source,
+            from_ext,
+            to_ext,
+        }
+    }
+}
+
 /// Classifies a file by extension. `None` for files that are not media items
 /// on their own (`.AAE` edit sidecars, unknown types).
 pub fn kind_from_extension(filename: &str) -> Option<MediaKind> {
@@ -126,6 +171,27 @@ mod tests {
         assert_eq!(kind_from_extension("IMG_1.MOV"), Some(MediaKind::Video));
         assert_eq!(kind_from_extension("IMG_1.AAE"), None);
         assert_eq!(kind_from_extension("noext"), None);
+    }
+
+    #[test]
+    fn save_plans() {
+        let mut a = Asset::new("DCIM/100APPLE", "IMG_0057.HEIC", MediaKind::Photo);
+        let p = a.save_plan();
+        assert_eq!((p.from_ext.as_str(), p.to_ext.as_str()), ("HEIC", "JPG"));
+        assert!(p.converts() && !p.uses_edited);
+
+        a.edited_render = Some(
+            "/PhotoData/Mutations/DCIM/100APPLE/IMG_0057/Adjustments/FullSizeRender.jpg".into(),
+        );
+        let p = a.save_plan();
+        assert_eq!(p.source, a.edited_render.clone().unwrap());
+        assert_eq!((p.from_ext.as_str(), p.to_ext.as_str()), ("JPG", "JPG"));
+        assert!(p.uses_edited);
+
+        let v = Asset::new("DCIM/100APPLE", "IMG_0042.MOV", MediaKind::Video);
+        assert_eq!(v.save_plan().to_ext, "MP4");
+        let png = Asset::new("DCIM/100APPLE", "IMG_0001.PNG", MediaKind::Photo);
+        assert!(!png.save_plan().converts());
     }
 
     #[test]

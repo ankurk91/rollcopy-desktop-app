@@ -1,7 +1,9 @@
 //! Main window (PLAN §6): toolbar, left pane with device card and library
-//! tree, centre pane with the connection guide or the selected items.
+//! tree, centre pane with the connection guide or the thumbnail grid
+//! (`grid.rs`), right pane with preview and info (`preview.rs`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
@@ -11,16 +13,101 @@ use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, Theme};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use unspool_device::{DeviceInfo, NoDeviceHint, Phase};
-use unspool_library::{Asset, Library, MediaKind, Source};
+use unspool_library::{Library, MediaKind};
 
 use crate::tree::{LibraryTree, Selection, month_name};
-use crate::worker::Event;
+use crate::worker::{CachePaths, Command, Event, Worker};
 
 const INSTALL_USBMUXD: &str = "sudo apt install usbmuxd";
-/// Rows shown in the interim item list (the M3 grid virtualises properly).
-const LIST_LIMIT: usize = 500;
+pub(crate) const LEFT_W: f32 = 270.;
+/// Default and minimum preview pane width; the grid always keeps room for at
+/// least one column.
+pub(crate) const PREVIEW_W: f32 = 300.;
+pub(crate) const PREVIEW_MIN_W: f32 = 220.;
+pub(crate) const GRID_MIN_W: f32 = 200.;
 
-enum LibState {
+actions!(
+    unspool,
+    [
+        SelectAll,
+        ClearSelection,
+        MoveLeft,
+        MoveRight,
+        MoveUp,
+        MoveDown,
+        ExtendLeft,
+        ExtendRight,
+        ExtendUp,
+        ExtendDown,
+        OpenItem,
+    ]
+);
+
+/// Drag payload for the preview pane's resize handle.
+#[derive(Clone)]
+pub(crate) struct ResizePreview;
+
+impl Render for ResizePreview {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
+}
+
+/// Key context for the main window's bindings.
+pub(crate) const KEY_CONTEXT: &str = "Unspool";
+
+pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("ctrl-a", SelectAll, Some(KEY_CONTEXT)),
+        KeyBinding::new("escape", ClearSelection, Some(KEY_CONTEXT)),
+        KeyBinding::new("left", MoveLeft, Some(KEY_CONTEXT)),
+        KeyBinding::new("right", MoveRight, Some(KEY_CONTEXT)),
+        KeyBinding::new("up", MoveUp, Some(KEY_CONTEXT)),
+        KeyBinding::new("down", MoveDown, Some(KEY_CONTEXT)),
+        KeyBinding::new("shift-left", ExtendLeft, Some(KEY_CONTEXT)),
+        KeyBinding::new("shift-right", ExtendRight, Some(KEY_CONTEXT)),
+        KeyBinding::new("shift-up", ExtendUp, Some(KEY_CONTEXT)),
+        KeyBinding::new("shift-down", ExtendDown, Some(KEY_CONTEXT)),
+        KeyBinding::new("enter", OpenItem, Some(KEY_CONTEXT)),
+        KeyBinding::new("space", OpenItem, Some(KEY_CONTEXT)),
+    ]);
+}
+
+/// Centre-pane filter chips (PLAN §6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum Filter {
+    #[default]
+    All,
+    Photos,
+    Videos,
+    Edited,
+}
+
+impl Filter {
+    pub(crate) const ALL: [Filter; 4] =
+        [Filter::All, Filter::Photos, Filter::Videos, Filter::Edited];
+
+    pub(crate) fn count_index(self) -> usize {
+        self as usize
+    }
+
+    pub(crate) fn matches(self, a: &unspool_library::Asset) -> bool {
+        match self {
+            Filter::All => true,
+            Filter::Photos => a.kind == MediaKind::Photo,
+            Filter::Videos => a.kind == MediaKind::Video,
+            Filter::Edited => a.is_edited(),
+        }
+    }
+}
+
+pub(crate) enum Thumb {
+    Pending,
+    Ready(PathBuf),
+    Missing,
+}
+
+pub(crate) enum LibState {
     None,
     Loading,
     Loaded { library: Library, tree: LibraryTree },
@@ -28,21 +115,46 @@ enum LibState {
 }
 
 pub struct MainView {
-    phase: Phase,
-    library: LibState,
-    selection: Selection,
+    pub(crate) paths: CachePaths,
+    pub(crate) commands: async_channel::Sender<Command>,
+    pub(crate) focus: FocusHandle,
+    pub(crate) phase: Phase,
+    pub(crate) library: LibState,
+    /// Left-pane tree selection.
+    pub(crate) selection: Selection,
+    pub(crate) filter: Filter,
     expanded: HashSet<i32>,
     show_details: bool,
+    /// Asset indices shown in the grid, newest first.
+    pub(crate) visible: Vec<usize>,
+    /// Selected items, by device path.
+    pub(crate) selected: HashSet<String>,
+    /// Grid position that Shift+click extends from.
+    pub(crate) anchor: Option<usize>,
+    /// Asset index shown in the preview pane.
+    pub(crate) focused: Option<usize>,
+    pub(crate) thumbs: HashMap<String, Thumb>,
+    /// Items per filter chip for the current tree selection, cached so the
+    /// header doesn't walk the whole library every frame.
+    pub(crate) filter_counts: [usize; 4],
+    pub(crate) grid_scroll: UniformListScrollHandle,
+    /// Tiles per row at the last render; arrow keys move by this much.
+    pub(crate) cols: usize,
+    pub(crate) preview_w: f32,
+    /// One-line status under the preview ("Opening IMG_0042.MOV…").
+    pub(crate) status: Option<String>,
     _tasks: Vec<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl MainView {
     pub fn new(
-        events: async_channel::Receiver<Event>,
+        worker: Worker,
+        paths: CachePaths,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let events = worker.events;
         let task = cx.spawn(async move |this, cx| {
             while let Ok(ev) = events.recv().await {
                 let alive = this.update(cx, |view, cx| {
@@ -57,12 +169,28 @@ impl MainView {
         let appearance = cx.observe_window_appearance(window, |_, window, cx| {
             Theme::sync_system_appearance(Some(window), cx);
         });
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
         Self {
+            paths,
+            commands: worker.commands,
+            focus,
             phase: Phase::NoDevice { hint: None },
             library: LibState::None,
             selection: Selection::All,
+            filter: Filter::All,
             expanded: HashSet::new(),
             show_details: false,
+            visible: Vec::new(),
+            selected: HashSet::new(),
+            anchor: None,
+            focused: None,
+            thumbs: HashMap::new(),
+            filter_counts: [0; 4],
+            grid_scroll: UniformListScrollHandle::new(),
+            cols: 1,
+            preview_w: PREVIEW_W,
+            status: None,
             _tasks: vec![task],
             _subscriptions: vec![appearance],
         }
@@ -77,20 +205,118 @@ impl MainView {
                     self.library = LibState::None;
                     self.selection = Selection::All;
                     self.show_details = false;
+                    self.status = None;
+                    self.thumbs.clear();
+                    self.recompute_visible();
                 }
                 self.phase = p;
             }
             Event::LibraryLoading => self.library = LibState::Loading,
-            Event::Library(Ok(library)) => {
+            Event::Library(Ok(mut library)) => {
+                dev_repeat(&mut library);
                 let tree = LibraryTree::build(&library.assets);
                 self.expanded.clear();
                 if let Some(newest) = tree.years.first() {
                     self.expanded.insert(newest.year);
                 }
                 self.library = LibState::Loaded { library, tree };
+                self.recompute_visible();
             }
             Event::Library(Err(e)) => self.library = LibState::Failed(e),
+            Event::Thumb { key, path } => {
+                self.thumbs.insert(key, Thumb::Ready(path));
+            }
+            Event::ThumbMissing { key } => {
+                self.thumbs.insert(key, Thumb::Missing);
+            }
+            Event::Opened { name } => self.status = Some(format!("Opened {name}")),
+            Event::OpenFailed { name, error } => {
+                self.status = Some(format!("Couldn't open {name}: {error}"))
+            }
         }
+    }
+
+    pub(crate) fn assets(&self) -> &[unspool_library::Asset] {
+        match &self.library {
+            LibState::Loaded { library, .. } => &library.assets,
+            _ => &[],
+        }
+    }
+
+    pub(crate) fn udid(&self) -> Option<&str> {
+        match &self.phase {
+            Phase::Ready { info } => Some(&info.udid),
+            _ => None,
+        }
+    }
+
+    /// Rebuilds the grid's item list after the tree selection, filter or
+    /// library changed. Clears the multi-selection (it belongs to a view).
+    pub(crate) fn recompute_visible(&mut self) {
+        let (sel, filter) = (self.selection, self.filter);
+        let mut counts = [0; 4];
+        for a in self
+            .assets()
+            .iter()
+            .filter(|a| LibraryTree::contains(sel, a))
+        {
+            for (n, f) in counts.iter_mut().zip(Filter::ALL) {
+                if f.matches(a) {
+                    *n += 1;
+                }
+            }
+        }
+        self.filter_counts = counts;
+        self.visible = self
+            .assets()
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| LibraryTree::contains(sel, a) && filter.matches(a))
+            .map(|(i, _)| i)
+            .rev()
+            .collect();
+        self.selected.clear();
+        self.anchor = None;
+        self.focused = self.visible.first().copied();
+        self.grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
+    }
+
+    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        let keys: Vec<String> = self
+            .visible
+            .iter()
+            .map(|&i| self.assets()[i].device_path())
+            .collect();
+        self.selected.extend(keys);
+        cx.notify();
+    }
+
+    fn clear_selection(&mut self, _: &ClearSelection, _: &mut Window, cx: &mut Context<Self>) {
+        self.selected.clear();
+        self.anchor = None;
+        cx.notify();
+    }
+
+    fn key_move(&mut self, delta: isize, extend: bool, cx: &mut Context<Self>) {
+        self.move_cursor(delta, extend);
+        cx.notify();
+    }
+
+    fn row_delta(&self) -> isize {
+        self.cols.max(1) as isize
+    }
+
+    fn resize_preview(
+        &mut self,
+        ev: &DragMoveEvent<ResizePreview>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let width = window.viewport_size().width / px(1.);
+        let x = ev.event.position.x / px(1.);
+        let max = (width - LEFT_W - GRID_MIN_W).max(PREVIEW_MIN_W);
+        self.preview_w = (width - x).clamp(PREVIEW_MIN_W, max);
+        cx.notify();
     }
 
     fn select(&mut self, sel: Selection) {
@@ -103,6 +329,7 @@ impl MainView {
             self.expanded.insert(y);
         }
         self.selection = sel;
+        self.recompute_visible();
     }
 
     // ---- toolbar -------------------------------------------------------
@@ -139,7 +366,7 @@ impl MainView {
         let theme = cx.theme().clone();
         let mut pane = v_flex()
             .id("left-pane")
-            .w(px(270.))
+            .w(px(LEFT_W))
             .h_full()
             .flex_shrink_0()
             .overflow_y_scroll()
@@ -382,11 +609,9 @@ impl MainView {
 
     // ---- centre pane -------------------------------------------------
 
-    fn render_center(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_center(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         match (&self.phase, &self.library) {
-            (Phase::Ready { .. }, LibState::Loaded { library, .. }) => {
-                self.render_items(library, cx).into_any_element()
-            }
+            (Phase::Ready { .. }, LibState::Loaded { .. }) => self.render_grid(window, cx),
             (Phase::Ready { .. }, LibState::Failed(e)) => guide(
                 IconName::TriangleAlert,
                 "Couldn't read the Photos library",
@@ -403,75 +628,44 @@ impl MainView {
             (phase, _) => render_guide(phase, cx),
         }
     }
-
-    fn render_items(&self, library: &Library, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
-        let items: Vec<&Asset> = library
-            .assets
-            .iter()
-            .filter(|a| LibraryTree::contains(self.selection, a))
-            .collect();
-        let title = match self.selection {
-            Selection::All => "All media".to_owned(),
-            Selection::Year(y) => y.to_string(),
-            Selection::Month(y, m) => format!("{} {y}", month_name(m)),
-            Selection::Undated => "Undated".to_owned(),
-            Selection::RecentlyDeleted => "Recently Deleted".to_owned(),
-        };
-        let photos = items.iter().filter(|a| a.kind == MediaKind::Photo).count();
-        let mut summary = format!(
-            "{} items · {photos} photos · {} videos",
-            items.len(),
-            items.len() - photos
-        );
-        if let Source::DcimScan { reason } = &library.source {
-            summary.push_str(&format!(" · from DCIM folder ({reason})"));
-        }
-
-        let mut rows = v_flex().gap_0p5();
-        for a in items.iter().rev().take(LIST_LIMIT) {
-            rows = rows.child(item_row(a, &theme));
-        }
-        if items.len() > LIST_LIMIT {
-            rows = rows.child(muted(
-                format!("… and {} more", items.len() - LIST_LIMIT),
-                &theme,
-            ));
-        }
-
-        v_flex()
-            .id("items")
-            .flex_1()
-            .h_full()
-            .overflow_y_scroll()
-            .p_4()
-            .gap_3()
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(title),
-                    )
-                    .child(muted(summary, &theme))
-                    .when(self.selection == Selection::RecentlyDeleted, |d| {
-                        d.child(muted(
-                            "Items in Recently Deleted are shown for reference and never copied."
-                                .to_owned(),
-                            &theme,
-                        ))
-                    }),
-            )
-            .child(rows)
-    }
 }
 
 impl Render for MainView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
+        let center = self.render_center(window, cx);
+        let ready = matches!(self.library, LibState::Loaded { .. })
+            && matches!(self.phase, Phase::Ready { .. });
         v_flex()
+            .track_focus(&self.focus)
+            .key_context(KEY_CONTEXT)
+            .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::clear_selection))
+            .on_action(cx.listener(|this, _: &MoveLeft, _, cx| this.key_move(-1, false, cx)))
+            .on_action(cx.listener(|this, _: &MoveRight, _, cx| this.key_move(1, false, cx)))
+            .on_action(cx.listener(|this, _: &MoveUp, _, cx| {
+                let d = this.row_delta();
+                this.key_move(-d, false, cx)
+            }))
+            .on_action(cx.listener(|this, _: &MoveDown, _, cx| {
+                let d = this.row_delta();
+                this.key_move(d, false, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ExtendLeft, _, cx| this.key_move(-1, true, cx)))
+            .on_action(cx.listener(|this, _: &ExtendRight, _, cx| this.key_move(1, true, cx)))
+            .on_action(cx.listener(|this, _: &ExtendUp, _, cx| {
+                let d = this.row_delta();
+                this.key_move(-d, true, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ExtendDown, _, cx| {
+                let d = this.row_delta();
+                this.key_move(d, true, cx)
+            }))
+            .on_action(cx.listener(|this, _: &OpenItem, _, cx| {
+                this.open_focused();
+                cx.notify();
+            }))
+            .on_drag_move(cx.listener(Self::resize_preview))
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
@@ -482,13 +676,8 @@ impl Render for MainView {
                     .min_h_0()
                     .w_full()
                     .child(self.render_left(cx))
-                    .child(
-                        div()
-                            .flex_1()
-                            .h_full()
-                            .min_w_0()
-                            .child(self.render_center(cx)),
-                    ),
+                    .child(div().flex_1().h_full().min_w_0().child(center))
+                    .when(ready, |d| d.child(self.render_preview(cx))),
             )
     }
 }
@@ -689,7 +878,7 @@ fn guide_frame(
 
 // ---- small helpers ------------------------------------------------------
 
-fn section_label(text: &'static str, theme: &Theme) -> impl IntoElement {
+pub(crate) fn section_label(text: &'static str, theme: &Theme) -> impl IntoElement {
     div()
         .text_xs()
         .font_weight(FontWeight::SEMIBOLD)
@@ -697,7 +886,7 @@ fn section_label(text: &'static str, theme: &Theme) -> impl IntoElement {
         .child(text)
 }
 
-fn muted(text: String, theme: &Theme) -> impl IntoElement {
+pub(crate) fn muted(text: String, theme: &Theme) -> impl IntoElement {
     div()
         .text_sm()
         .text_color(theme.muted_foreground)
@@ -715,61 +904,29 @@ fn detail(label: &str, value: &str, theme: &Theme) -> impl IntoElement {
         .child(div().child(value.to_owned()))
 }
 
-fn gb(bytes: u64) -> String {
+pub(crate) fn gb(bytes: u64) -> String {
     format!("{:.0} GB", bytes as f64 / 1e9)
 }
 
-fn item_row(a: &Asset, theme: &Theme) -> impl IntoElement {
-    let when = a
-        .captured_local()
-        .map(|d| d.format("%-d %b %Y %H:%M").to_string())
-        .unwrap_or_else(|| "-".into());
-    let mut badges = Vec::new();
-    if a.kind == MediaKind::Video {
-        badges.push(match a.duration_secs {
-            Some(d) => format!("▶ {}:{:02}", d as u64 / 60, d as u64 % 60),
-            None => "▶".into(),
-        });
+/// Development aid: `UNSPOOL_DEV_REPEAT=N` repeats the library N times to
+/// test grid performance at PLAN §6's 5,000 items with a small phone.
+/// Repeated items share device paths, so selection treats them as one.
+fn dev_repeat(library: &mut Library) {
+    let Some(n) = std::env::var("UNSPOOL_DEV_REPEAT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n > 1)
+    else {
+        return;
+    };
+    let original = library.assets.clone();
+    for _ in 1..n {
+        library.assets.extend(original.iter().cloned());
     }
-    if a.live_photo {
-        badges.push("Live".into());
-    }
-    if a.is_edited() {
-        badges.push("Edited".into());
-    }
-    if a.favorite {
-        badges.push("♥".into());
-    }
-    h_flex()
-        .w_full()
-        .gap_3()
-        .px_2()
-        .py_1()
-        .rounded_md()
-        .text_sm()
-        .hover(|s| s.bg(theme.muted))
-        .child(
-            Icon::new(if a.kind == MediaKind::Video {
-                IconName::Video
-            } else {
-                IconName::Image
-            })
-            .xsmall()
-            .text_color(theme.muted_foreground),
-        )
-        .child(div().w(px(150.)).child(a.filename.clone()))
-        .child(
-            div()
-                .w(px(150.))
-                .text_color(theme.muted_foreground)
-                .child(when),
-        )
-        .child(
-            div()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(badges.join(" · ")),
-        )
+    eprintln!(
+        "dev: library repeated {n}x = {} items",
+        library.assets.len()
+    );
 }
 
 /// Short phase name for the log (stderr).
