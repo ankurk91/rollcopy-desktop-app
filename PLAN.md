@@ -2,7 +2,7 @@
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
-Status: **M0, M1 and M2 done (2026-11-12). M3 built**, waiting for the smooth-scroll check on this laptop. Next: M4 (copy pipeline).
+Status: **M0–M3 done (2026-11-12). M4 copy pipeline works on the phone** (a whole month copied and checked file by file). The UI fixes from testing are in. Next: M5 (preferences).
 
 ---
 
@@ -71,6 +71,8 @@ You asked what the "p2p" connection can do. It's actually two protocols. Both we
 - ✔ Edited: `ZADJUSTMENTTIMESTAMP` is set exactly for the items that have a `Mutations/` folder (every one checked).
 - ✔ `DCIM/` holds more files than the database has rows: on the test phone the extra files were exactly the Live Photo `.MOV` clips and the `.AAE` edit sidecars. Every row has a file.
 
+- ✔ (2026-11-12) **Source app:** `ZADDITIONALASSETATTRIBUTES.ZIMPORTEDBYDISPLAYNAME` ("Camera", "Snapchat", "WhatsApp", "ChatGPT", "Drive", "Screenshots"; "SpringBoard" means saved from iOS). **Camera EXIF:** `ZEXTENDEDATTRIBUTES` (`ZCAMERAMAKE`/`ZCAMERAMODEL`/`ZLENSMODEL`/`ZISO`/`ZAPERTURE`/`ZSHUTTERSPEED`/`ZFOCALLENGTH`). **Street address:** `ZREVERSELOCATIONDATA`, an NSKeyedArchiver plist with `addressString` at its root. **User albums:** `ZGENERICALBUM` with `ZKIND = 2`, joined through the table whose columns are `Z_<n>ALBUMS` / `Z_<n>ASSETS` (`Z_34ASSETS` on iOS 27; the numbers change, so the table is found by column names).
+
 The database is optional. If it can't be read, fall back to plain `DCIM/` browsing with file dates. On the test phone the fallback found the same items and the same Live Photos as the database (checked in M1), but it can't tell which items are in Recently Deleted.
 
 ## 4. Technology
@@ -81,7 +83,7 @@ The database is optional. If it can't be read, fall back to plain `DCIM/` browsi
 | iPhone access | **idevice =0.1.68** (pure Rust, MIT): `default-features = false`, features `ring`, `usbmuxd`, `pair`, `afc`, `device_info`, `diagnostics_relay` | Builds (M0). `ring` replaces the default aws-lc crypto. No `libimobiledevice-dev` needed. Needs the system `usbmuxd` daemon (already installed). |
 | Async | tokio runtime on a background thread; results sent to the UI over channels | Keep all device I/O off the UI thread. |
 | Photos DB | `rusqlite` (bundled SQLite) | |
-| HEIC → JPG | `libheif-rs` =3.0.0 with `default-features = false, features = ["v1_17"]` (needs `libheif-dev`) + `image` for JPEG encoding | Keeps EXIF data and applies rotation. |
+| HEIC → JPG | `libheif-rs` =3.0.0 with **`embedded-libheif`** (a bundled libheif 1.23, built with cmake against the system `libde265`) + `image` 0.25 for JPEG encoding (EXIF and ICC support built in) | M4 found that the system libheif 1.17.6 **can't open about a third of the** iOS 27 HEICs tested ("Non-existing item ID referenced": portrait/depth photos). The bundled build also links x265 and needs **`libnuma-dev`**. | Keeps EXIF data and applies rotation. |
 | MOV → MP4 | `ffmpeg` command-line tool, run as a subprocess | Lossless remux: `-c copy -tag:v hvc1 -movflags +faststart`. Optional H.264 re-encode setting. |
 | Thumbnails | **iOS's own** `PhotoData/Thumbnails/V2/<dir>/<file>/5005.JPG` (found in M3) | Present for every item on iOS 27, photos and videos: 480×360 for photos, 640×360 for videos, about 50–85 KB each. Copied once into the thumbnail cache. No HEIC decoding and no video copy is needed for the grid or the preview. Fallback when it's missing: a type icon. ffmpeg / libheif thumbnails only if a phone turns out not to have them. |
 | Tray icon | **ksni 0.3.x** (StatusNotifierItem over D-Bus) | gpui has no tray support. On Cinnamon the tray applet must be enabled. |
@@ -176,8 +178,10 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 - Recently Deleted is listed with its count but greyed out, and excluded from "copy folder".
 
 **Centre pane: thumbnail grid**
-- Filter chips: All / Photos / Videos / Edited.
-- Badges on each tile: ▶ video with duration, ✎ edited, ◉ Live Photo, ✓ already in the current destination folder.
+- Filter chips: All / Photos / Videos / Edited, plus Copied / Not copied (click the active one again to turn it off). Copied state comes from the destination folder, as for the badges.
+- Sort by date taken: Newest first (default) / Oldest first; undated items last.
+- Place and Location in the info panel have copy-to-clipboard buttons.
+- Badges on each tile: ▶ video with duration, EDITED and LIVE text badges (a pencil looked clickable), and a green sync icon for items already in the current destination folder. Selection is a separate blue ✓.
 - Selection: click, Ctrl+click, Shift+click, Ctrl+A, Esc to clear.
 - Keyboard (added in M3 at the user's request): ← → ↑ ↓ move the focused item and update the preview, Shift+arrows extend the selection, Space / Enter open the item.
 - The preview pane is resizable by dragging its left edge (220 px minimum; the grid keeps at least one column). Its width isn't saved yet; that comes with `ui.toml` in M5.
@@ -189,17 +193,18 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 **Right pane: preview and info**
 - Photos: a large preview. Double-click opens fullscreen with ← / → to step through.
 - Videos: a poster frame. "Open ▶" copies the file to a temp location and opens it in the system player with `xdg-open`, because gpui has no video widget.
-- Info: file name, type, capture date and time zone, pixel size, codec, length, file size, edited / Live / favourite, location as plain coordinates with no map in v1, and **what it will be saved as** (e.g. "HEIC → JPG").
+- Info: file name, type, capture date and time zone, pixel size, length, file size, edited / Live / favourite, **source app**, **camera, lens, exposure**, **place** (street address), location coordinates (no map in v1), **albums**, **what it will be saved as** (e.g. "HEIC → JPG"), and **whether it's already copied** (and where).
+- The pane is hidden until an item is selected; × closes it, and the grid then takes the full width with tiles stretched to fill each row.
 
 **Bottom: transfer queue**
 - Collapsed: one summary line with done / total, bytes, failed count and time left.
-- Expanded: a list with a status icon per item. Failed rows show the reason, plus "Retry" and "Retry all failed".
+- Expanded: a list with a status icon per item and the local time it finished. Failed rows show the reason, plus "Retry" and "Retry all failed". The header also has Pause/Resume, Clear finished, Export error report (CSV) and Open folder.
 - Each item moves through: Queued → Reading → Converting → Verifying → Done / Failed / Skipped / Overwritten.
 
 **Tray icon (ksni)**
 - The icon changes with status: idle / device connected / copying (progress tooltip) / error.
 - Menu: Show Unspool · `<device name>` · Pause/Resume · Quit.
-- Closing the window keeps the app in the tray **only while a copy is running**. Otherwise it quits.
+- Closing the window keeps the app in the tray **only while a copy is running**. Otherwise it quits. Until the tray exists (M6), closing during a copy asks "Copies are still running: Keep copying / Quit".
 - Optional desktop notification when a queue finishes.
 
 **Copy actions**
@@ -212,11 +217,13 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 These are the rules proven in the manual transfer, turned into code.
 
 1. **Pick the source.** Use the edited version (`FullSizeRender.*`) if it exists, otherwise the original.
-2. **Convert to compatible formats:**
+2. **Convert to compatible formats** (`unspool-convert`; checked on real files 2026-11-12):
+   - HEIC → JPG keeps the Display P3 ICC profile, Make/Model, the capture time with its offset, and GPS. The pixels are rotated by libheif, so the EXIF orientation is reset to 1. A 12 MP photo takes about 2.6 s in a debug build.
+   - MOV → MP4 keeps creation time, GPS and Make, maps only video and audio (iPhone MOVs carry five Apple data tracks), tags HEVC as `hvc1`, and drops the Dolby Vision box, leaving plain HLG.
    - JPG / PNG / GIF / MP4 → copied byte for byte.
    - HEIC → JPG, quality 92, keeping EXIF and applying rotation.
    - MOV (HEVC) → MP4 by lossless remux. Preference: "Re-encode to H.264 for old devices" (off by default).
-   - **iPhone videos are HDR** (checked 2026-11-12): HEVC Main 10, HLG (`arib-std-b67`), BT.2020, Dolby Vision profile 8.4. Celluloid (mpv) on this laptop played one in **black and white**, while ffmpeg decodes it in full colour. A lossless remux keeps the HDR, so M4 must check that the MP4 plays correctly here. Try dropping the Dolby Vision metadata and keeping only the HLG layer. The H.264 option should also tone-map to SDR: `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p` gave correct colours.
+   - **iPhone videos are HDR** (checked 2026-11-12): HEVC Main 10, HLG (`arib-std-b67`), BT.2020, Dolby Vision profile 8.4. Celluloid (mpv) on this laptop played one in **black and white**, while ffmpeg decodes it in full colour. A lossless remux keeps the HDR. **Decided 2026-11-12: Lossless stays the default.** The MP4 is correct: it decodes in colour with ffmpeg (software and VA-API), VLC, Android and iPhone; only Celluloid shows it in black and white. The user plays videos in VLC. The H.264 option stays as a preference (M5) for old devices. It's slow in software (about 1 min per 20 s clip because of the float tone-map); **use VA-API (`tonemap_vaapi` + `h264_vaapi`) on the Intel Arc** before offering it in Preferences. Try dropping the Dolby Vision metadata and keeping only the HLG layer. The H.264 option should also tone-map to SDR: `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p` gave correct colours.
    - Live Photos → **still only, always.** The motion clip is never copied. There's no setting for it.
 3. **Arrange the destination** as `<dest>/<YYYY>/<MM>/images|videos/<IMG_xxxx>.<ext>`, using the capture date in its own time zone. `<dest>` defaults to `~/Pictures/Unspool/<device name>/`. A flat-folder layout is available as a preference.
 4. **Write safely:** write to `<name>.part`, check it (size for straight copies; decodes for converted files), then rename. Set the file's modified time to the capture date. On overwrite, the old file is only replaced at the final rename, so a failed copy never destroys it.
@@ -258,7 +265,7 @@ Opened from ☰ → Preferences… or Ctrl+,. It's a small separate window with 
 | | Videos | Lossless MP4 (default) / Re-encode to H.264 |
 | **Library** | Show Recently Deleted (greyed, never copied) | On |
 | | Default view | By date / On-phone folders |
-| **App** | Theme | System / Light / Dark |
+| **App** | Theme | System / Light / Dark (a toolbar toggle cycles through them already, from M4; dark mode uses softer greys than the stock theme) |
 | | Keep running in tray while copying | On |
 | | Notify when transfers finish | On |
 | | Check for updates on startup (at most once a day) | Off |
@@ -292,7 +299,7 @@ A small modal opened from ☰ → About Unspool:
 ```
 
 - **Version** comes from `CARGO_PKG_VERSION`. The short git commit is added at build time by `build.rs`.
-- **Credits** expands to the libraries and assets used, with their licences: gpui, gpui-component, idevice, ksni, libheif, FFmpeg, Tabler Icons.
+- **Credits** expands to the libraries and assets used, with their licences: gpui, gpui-component, idevice, ksni, libheif, libde265, FFmpeg, Tabler Icons, Lucide icons (MIT, via gpui-kit-assets).
 - **Copy debug info** (in Credits) puts the app version, OS, desktop session, usbmuxd version and the connected iOS version on the clipboard, for bug reports.
 
 ## 8c. Check for updates
@@ -361,7 +368,8 @@ The device, library, convert and queue crates have no UI dependency, so they can
 - Rust: **installed 2026-11-12** via rustup (stable 1.99.1, in `~/.cargo` and `~/.rustup`; rustup added `. "$HOME/.cargo/env"` to `~/.bashrc` and `~/.profile`).
 - Already present: build-essential, pkg-config, libssl-dev, libxkbcommon-dev, libwayland-dev, libxcb1-dev, libfontconfig-dev, libfreetype-dev, libzstd-dev, libdbus-1-dev, Vulkan (Intel Arc), usbmuxd, ffmpeg.
 - Installed for M0 (confirmed 2026-11-12): clang, cmake, libxkbcommon-x11-dev, libx11-xcb-dev, libheif-dev.
-- The system libheif is 1.17.6. `libheif-rs` 3.0's default needs ≥ 1.23, so it's built with the `v1_17` feature only. Covered by `crates/unspool-convert/tests/libheif_smoke.rs`.
+- Needed from M4: `libde265-dev` (already present) and **`libnuma-dev`** (`sudo apt install libnuma-dev`). The bundled libheif links x265, and x265's static link needs `-lnuma`.
+- The system libheif is 1.17.6. It builds, but it's **too old for iOS 27 photos** (see §4). Unspool now uses the bundled libheif 1.23 instead.
 - The usbmuxd socket (`/var/run/usbmuxd`) only exists while an Apple device is plugged in, because udev starts the daemon on demand. The connection guide (§5) must not treat a missing socket as "usbmuxd not installed" on its own. Check whether the binary is installed too.
 
 ## 14. Risks and open questions

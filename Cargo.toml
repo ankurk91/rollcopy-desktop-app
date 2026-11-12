@@ -13,6 +13,8 @@ publish = false
 [workspace.dependencies]
 unspool-device = { path = "crates/unspool-device" }
 unspool-library = { path = "crates/unspool-library" }
+unspool-convert = { path = "crates/unspool-convert" }
+unspool-queue = { path = "crates/unspool-queue" }
 
 # UI: gpui-kit bundles gpui-component 0.9.x with `gpui-pre` (a crates.io snapshot
 # of Zed's gpui, pinned =0.3.12 by gpui-kit) and the Linux X11/Wayland platform.

@@ -8,5 +8,9 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Ubuntu 24.04 / Mint 22 ship libheif 1.17.6; the crate's default needs >= 1.23.
-libheif-rs = { version = "=3.0.0", default-features = false, features = ["v1_17"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# Bundled libheif 1.23 (built with cmake against the system libde265 HEVC
+# decoder). The system libheif 1.17.6 could not open about a third of the
+# iOS 27 HEICs tested ("Non-existing item ID referenced", portrait/depth photos).
+libheif-rs = { version = "=3.0.0", default-features = false, features = ["embedded-libheif", "v1_23"] }
+thiserror = "2"

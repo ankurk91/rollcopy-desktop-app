@@ -10,5 +10,7 @@ publish.workspace = true
 [dependencies]
 unspool-device.workspace = true
 unspool-library.workspace = true
+unspool-convert.workspace = true
+unspool-queue.workspace = true
 
-tokio = { version = "1", features = ["rt", "macros", "time"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }

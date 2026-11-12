@@ -7,7 +7,8 @@ use std::path::PathBuf;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, Theme};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -15,6 +16,8 @@ use gpui_kit::*;
 use unspool_device::{DeviceInfo, NoDeviceHint, Phase};
 use unspool_library::{Library, MediaKind};
 
+use crate::theme::{self, ThemeChoice};
+use crate::transfers::Transfers;
 use crate::tree::{LibraryTree, Selection, month_name};
 use crate::worker::{CachePaths, Command, Event, Worker};
 
@@ -101,6 +104,25 @@ impl Filter {
     }
 }
 
+/// Copied-state chips: is the item already in the Save-to folder?
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum SyncFilter {
+    #[default]
+    All,
+    Copied,
+    NotCopied,
+}
+
+impl SyncFilter {
+    pub(crate) fn matches(self, copied: bool) -> bool {
+        match self {
+            SyncFilter::All => true,
+            SyncFilter::Copied => copied,
+            SyncFilter::NotCopied => !copied,
+        }
+    }
+}
+
 pub(crate) enum Thumb {
     Pending,
     Ready(PathBuf),
@@ -137,12 +159,32 @@ pub struct MainView {
     /// Items per filter chip for the current tree selection, cached so the
     /// header doesn't walk the whole library every frame.
     pub(crate) filter_counts: [usize; 4],
+    pub(crate) sync_filter: SyncFilter,
+    /// All / copied / not copied, for the current tree selection and filter.
+    pub(crate) sync_counts: [usize; 3],
+    /// Counts need rebuilding (a copy finished since the last count).
+    pub(crate) counts_dirty: bool,
+    /// Sort by date taken, newest first (default) or oldest first.
+    pub(crate) newest_first: bool,
     pub(crate) grid_scroll: UniformListScrollHandle,
     /// Tiles per row at the last render; arrow keys move by this much.
     pub(crate) cols: usize,
+    /// Tile size at the last render (tiles stretch to fill each row).
+    pub(crate) tile: f32,
     pub(crate) preview_w: f32,
     /// One-line status under the preview ("Opening IMG_0042.MOV…").
     pub(crate) status: Option<String>,
+    pub(crate) transfers: Transfers,
+    /// Copy settings other than the destination (PLAN §8a; editable in M5).
+    pub(crate) settings_base: unspool_queue::Settings,
+    /// Whether an item's output file already exists in the destination
+    /// (the ✓ badge), by device path. Filled for on-screen tiles.
+    pub(crate) in_dest: HashMap<String, bool>,
+    pub(crate) theme_choice: ThemeChoice,
+    /// Preview pane shown; opens when an item is selected, × closes it.
+    pub(crate) preview_open: bool,
+    /// "Copies are still running" prompt on window close.
+    pub(crate) quit_prompt: bool,
     _tasks: Vec<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -166,8 +208,15 @@ impl MainView {
                 }
             }
         });
-        let appearance = cx.observe_window_appearance(window, |_, window, cx| {
-            Theme::sync_system_appearance(Some(window), cx);
+        let appearance = cx.observe_window_appearance(window, |this, window, cx| {
+            theme::apply(this.theme_choice, window, cx);
+        });
+        // Ask before closing while copies are running (PLAN §6 tray rule; the
+        // tray itself comes in M6).
+        let weak = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |_, cx| {
+            weak.update(cx, |view, cx| view.confirm_close(cx))
+                .unwrap_or(true)
         });
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
@@ -187,10 +236,21 @@ impl MainView {
             focused: None,
             thumbs: HashMap::new(),
             filter_counts: [0; 4],
+            sync_filter: SyncFilter::All,
+            sync_counts: [0; 3],
+            counts_dirty: false,
+            newest_first: true,
             grid_scroll: UniformListScrollHandle::new(),
             cols: 1,
+            tile: crate::grid::MIN_TILE,
             preview_w: PREVIEW_W,
             status: None,
+            transfers: Transfers::default(),
+            settings_base: unspool_queue::Settings::new(PathBuf::new()),
+            in_dest: HashMap::new(),
+            theme_choice: ThemeChoice::System,
+            preview_open: false,
+            quit_prompt: false,
             _tasks: vec![task],
             _subscriptions: vec![appearance],
         }
@@ -209,8 +269,15 @@ impl MainView {
                     self.thumbs.clear();
                     self.recompute_visible();
                 }
-                self.phase = p;
+                if let Phase::Ready { info } = &p {
+                    let (udid, name) = (info.udid.clone(), info.name.clone());
+                    self.phase = p;
+                    self.on_device_ready(&udid, &name);
+                } else {
+                    self.phase = p;
+                }
             }
+            Event::Queue(ev) => self.on_queue_event(ev),
             Event::LibraryLoading => self.library = LibState::Loading,
             Event::Library(Ok(mut library)) => {
                 dev_repeat(&mut library);
@@ -252,11 +319,20 @@ impl MainView {
 
     /// Rebuilds the grid's item list after the tree selection, filter or
     /// library changed. Clears the multi-selection (it belongs to a view).
-    pub(crate) fn recompute_visible(&mut self) {
+    /// Rebuilds the chip counts and fills the copied-state cache for every
+    /// item in the current tree selection (one file check each, cached).
+    pub(crate) fn recount(&mut self) {
         let (sel, filter) = (self.selection, self.filter);
+        let settings = self.copy_settings();
+        let LibState::Loaded { library, .. } = &self.library else {
+            self.filter_counts = [0; 4];
+            self.sync_counts = [0; 3];
+            return;
+        };
         let mut counts = [0; 4];
-        for a in self
-            .assets()
+        let mut sync = [0; 3];
+        for a in library
+            .assets
             .iter()
             .filter(|a| LibraryTree::contains(sel, a))
         {
@@ -265,16 +341,55 @@ impl MainView {
                     *n += 1;
                 }
             }
+            if !filter.matches(a) {
+                continue;
+            }
+            let key = a.device_path();
+            let copied = match (self.in_dest.get(&key), &settings) {
+                (Some(&c), _) => c,
+                (None, Some(s)) => {
+                    let c = unspool_queue::dest_path(s, a).exists();
+                    self.in_dest.insert(key, c);
+                    c
+                }
+                (None, None) => false,
+            };
+            sync[0] += 1;
+            sync[if copied { 1 } else { 2 }] += 1;
         }
         self.filter_counts = counts;
-        self.visible = self
+        self.sync_counts = sync;
+        self.counts_dirty = false;
+    }
+
+    pub(crate) fn recompute_visible(&mut self) {
+        self.recount();
+        let (sel, filter, sync) = (self.selection, self.filter, self.sync_filter);
+        let mut visible: Vec<usize> = self
             .assets()
             .iter()
             .enumerate()
-            .filter(|(_, a)| LibraryTree::contains(sel, a) && filter.matches(a))
+            .filter(|(_, a)| {
+                LibraryTree::contains(sel, a)
+                    && filter.matches(a)
+                    && sync.matches(self.in_dest.get(&a.device_path()) == Some(&true))
+            })
             .map(|(i, _)| i)
-            .rev()
             .collect();
+        // By date taken; undated items last either way.
+        let assets = self.assets();
+        visible.sort_by(|&i, &j| {
+            let (a, b) = (&assets[i], &assets[j]);
+            let by_date = match (a.captured, b.captured) {
+                (Some(x), Some(y)) if self.newest_first => y.cmp(&x),
+                (Some(x), Some(y)) => x.cmp(&y),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            };
+            by_date.then_with(|| a.filename.cmp(&b.filename))
+        });
+        self.visible = visible;
         self.selected.clear();
         self.anchor = None;
         self.focused = self.visible.first().copied();
@@ -282,13 +397,17 @@ impl MainView {
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_all_visible();
+        cx.notify();
+    }
+
+    pub(crate) fn select_all_visible(&mut self) {
         let keys: Vec<String> = self
             .visible
             .iter()
             .map(|&i| self.assets()[i].device_path())
             .collect();
         self.selected.extend(keys);
-        cx.notify();
     }
 
     fn clear_selection(&mut self, _: &ClearSelection, _: &mut Window, cx: &mut Context<Self>) {
@@ -334,8 +453,9 @@ impl MainView {
 
     // ---- toolbar -------------------------------------------------------
 
-    fn render_toolbar(&self, cx: &Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
+    fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let save_to = self.render_save_to(cx);
         let status = match &self.phase {
             Phase::Ready { info } => info.name.clone(),
             Phase::NoDevice { .. } | Phase::UsbmuxdMissing => "No iPhone connected".into(),
@@ -351,7 +471,25 @@ impl MainView {
             .border_color(theme.border)
             .child(Icon::new(IconName::Smartphone).small())
             .child(div().font_weight(FontWeight::SEMIBOLD).child("Unspool"))
+            .child(div().w(px(24.)))
+            .children(save_to)
             .child(div().flex_1())
+            .child(
+                btn("theme-toggle")
+                    .xsmall()
+                    .ghost()
+                    .icon(match self.theme_choice {
+                        ThemeChoice::System => IconName::SunMoon,
+                        ThemeChoice::Light => IconName::Sun,
+                        ThemeChoice::Dark => IconName::Moon,
+                    })
+                    .tooltip(self.theme_choice.label())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.theme_choice = this.theme_choice.next();
+                        theme::apply(this.theme_choice, window, cx);
+                        cx.notify();
+                    })),
+            )
             .child(
                 div()
                     .text_sm()
@@ -369,7 +507,7 @@ impl MainView {
             .w(px(LEFT_W))
             .h_full()
             .flex_shrink_0()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .p_3()
             .gap_3()
             .bg(theme.sidebar)
@@ -480,6 +618,17 @@ impl MainView {
                 .text_xs()
                 .text_color(theme.link)
                 .cursor_pointer()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(
+                    Icon::new(if show {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronRight
+                    })
+                    .xsmall(),
+                )
                 .child(if show { "Hide details" } else { "Details" })
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.show_details = !this.show_details;
@@ -587,12 +736,31 @@ impl MainView {
             .when(selected, |d| d.bg(theme.accent))
             .when(!selected, |d| d.hover(|s| s.bg(theme.muted)))
             .when(greyed, |d| d.text_color(theme.muted_foreground))
-            .child(match expanded {
-                Some(true) => Icon::new(IconName::ChevronDown).xsmall().into_any_element(),
-                Some(false) => Icon::new(IconName::ChevronRight)
-                    .xsmall()
+            .child(match (expanded, sel) {
+                // The chevron toggles on its own, whatever is selected.
+                (Some(open), Selection::Year(year)) => div()
+                    .id(SharedString::from(format!("chev-{year}")))
+                    .p_0p5()
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .hover(|s| s.bg(theme.muted))
+                    .child(
+                        Icon::new(if open {
+                            IconName::ChevronDown
+                        } else {
+                            IconName::ChevronRight
+                        })
+                        .xsmall(),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.expanded.remove(&year) {
+                            this.expanded.insert(year);
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                    }))
                     .into_any_element(),
-                None => div().w(px(12.)).into_any_element(),
+                _ => div().w(px(16.)).into_any_element(),
             })
             .child(div().flex_1().child(label))
             .child(
@@ -634,6 +802,9 @@ impl Render for MainView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let center = self.render_center(window, cx);
+        let transfers = self.render_transfers(cx);
+        let conflict = self.render_conflict(cx);
+        let toolbar = self.render_toolbar(cx).into_any_element();
         let ready = matches!(self.library, LibState::Loaded { .. })
             && matches!(self.phase, Phase::Ready { .. });
         v_flex()
@@ -667,9 +838,10 @@ impl Render for MainView {
             }))
             .on_drag_move(cx.listener(Self::resize_preview))
             .size_full()
+            .relative()
             .bg(theme.background)
             .text_color(theme.foreground)
-            .child(self.render_toolbar(cx))
+            .child(toolbar)
             .child(
                 h_flex()
                     .flex_1()
@@ -677,8 +849,13 @@ impl Render for MainView {
                     .w_full()
                     .child(self.render_left(cx))
                     .child(div().flex_1().h_full().min_w_0().child(center))
-                    .when(ready, |d| d.child(self.render_preview(cx))),
+                    .when(ready && self.preview_open, |d| {
+                        d.child(self.render_preview(cx))
+                    }),
             )
+            .children(transfers)
+            .children(conflict)
+            .children(self.render_quit_prompt(cx))
     }
 }
 
@@ -706,7 +883,7 @@ fn render_guide(phase: &Phase, cx: &mut Context<MainView>) -> AnyElement {
                             .child(INSTALL_USBMUXD),
                     )
                     .child(
-                        Button::new("copy-install")
+                        btn("copy-install")
                             .small()
                             .outline()
                             .icon(IconName::Copy)
@@ -946,5 +1123,90 @@ fn phase_label(p: &Phase) -> &'static str {
         Phase::Locked { .. } => "locked",
         Phase::Ready { .. } => "ready",
         Phase::Failed { .. } => "failed",
+    }
+}
+
+/// A button with the hand cursor (gpui-component defaults to the arrow).
+pub(crate) fn btn(id: impl Into<ElementId>) -> Button {
+    Button::new(id).cursor_pointer()
+}
+
+impl MainView {
+    /// Number of items still queued, copying or waiting for an answer.
+    pub(crate) fn unfinished_transfers(&self) -> usize {
+        self.transfers
+            .rows
+            .iter()
+            .filter(|r| !r.state.is_finished())
+            .count()
+    }
+
+    /// Window close requested: allow it, or show the "still copying" prompt.
+    fn confirm_close(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.unfinished_transfers() == 0 {
+            return true;
+        }
+        self.quit_prompt = true;
+        cx.notify();
+        false
+    }
+
+    fn render_quit_prompt(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.quit_prompt {
+            return None;
+        }
+        let theme = cx.theme().clone();
+        let left = self.unfinished_transfers();
+        let card = v_flex()
+            .w(px(440.))
+            .p_5()
+            .gap_3()
+            .rounded_lg()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.background)
+            .shadow_lg()
+            .child(
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Copies are still running"),
+            )
+            .child(muted(
+                format!(
+                    "{left} item(s) haven't been copied yet. If you quit now they are not copied; \
+                     files already copied are kept, and nothing is left half-written."
+                ),
+                &theme,
+            ))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .justify_end()
+                    .child(btn("quit-cancel").outline().label("Keep copying").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.quit_prompt = false;
+                            cx.notify();
+                        }),
+                    ))
+                    .child(
+                        btn("quit-anyway")
+                            .danger()
+                            .label("Quit")
+                            .on_click(|_, _, cx| cx.quit()),
+                    ),
+            );
+        Some(
+            div()
+                .id("quit-backdrop")
+                .absolute()
+                .inset_0()
+                .bg(hsla(0., 0., 0., 0.45))
+                .flex()
+                .items_center()
+                .justify_center()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(card)
+                .into_any_element(),
+        )
     }
 }

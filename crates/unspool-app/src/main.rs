@@ -2,11 +2,12 @@
 
 mod grid;
 mod preview;
+mod theme;
+mod transfers;
 mod tree;
 mod view;
 mod worker;
 
-use gpui_kit::component::Theme;
 use gpui_kit::*;
 
 const APP_NAME: &str = "Unspool";
@@ -16,15 +17,24 @@ const APP_ID: &str = "dev.unspool.Unspool";
 gpui_kit_assets::icon_assets!(
     AppAssets,
     [
+        ArrowDownWideNarrow,
+        ArrowUpNarrowWide,
         Battery,
         BatteryCharging,
         ChevronDown,
         ChevronRight,
         Copy,
+        FolderCheck,
+        FolderOpen,
+        Moon,
+        Sun,
+        SunMoon,
+        X,
         Image,
         Images,
         Lock,
         Plug,
+        RefreshCw,
         ShieldCheck,
         ShieldX,
         Smartphone,
@@ -36,14 +46,27 @@ gpui_kit_assets::icon_assets!(
     ]
 );
 
-fn cache_dir() -> std::path::PathBuf {
-    directories::ProjectDirs::from("dev", "unspool", "unspool")
-        .map(|d| d.cache_dir().to_path_buf())
-        .unwrap_or_else(|| std::env::temp_dir().join("unspool"))
+fn app_paths() -> worker::CachePaths {
+    match directories::ProjectDirs::from("dev", "unspool", "unspool") {
+        Some(d) => worker::CachePaths {
+            root: d.cache_dir().to_path_buf(),
+            state: d
+                .state_dir()
+                .unwrap_or_else(|| d.data_local_dir())
+                .to_path_buf(),
+        },
+        None => {
+            let tmp = std::env::temp_dir().join("unspool");
+            worker::CachePaths {
+                root: tmp.clone(),
+                state: tmp,
+            }
+        }
+    }
 }
 
 fn main() {
-    let paths = worker::CachePaths { root: cache_dir() };
+    let paths = app_paths();
     let worker = worker::spawn(paths.clone());
 
     gpui_kit::application()
@@ -63,7 +86,7 @@ fn main() {
                 ..Default::default()
             };
             gpui_kit::open_window(options, cx, move |window, cx| {
-                Theme::sync_system_appearance(Some(window), cx);
+                theme::apply(theme::ThemeChoice::System, window, cx);
                 cx.new(|cx| view::MainView::new(worker, paths, window, cx))
             })
             .expect("failed to open window");

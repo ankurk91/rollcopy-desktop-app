@@ -27,6 +27,10 @@ commands:
   info                 show device info
   ls [PATH]            list a directory on the phone (default /)
   pull PATH DEST       copy one file from the phone to DEST on this computer
+  convert SRC DST [--h264]
+                       convert a local HEIC to JPG or MOV to MP4 (no phone needed)
+  copy --month YYYY-MM --dest DIR [--overwrite] [--h264]
+                       copy one month from the phone like the app does
   watch                follow the connection guide (asks to Trust if needed)
   library [--list] [--dcim]
                        read the Photos library (--dcim: skip the database)
@@ -41,6 +45,17 @@ async fn main() -> ExitCode {
         Some("info") => cmd_info(udid).await,
         Some("ls") => cmd_ls(udid, args.get(1).map_or("/", String::as_str)).await,
         Some("pull") if args.len() == 3 => cmd_pull(udid, &args[1], PathBuf::from(&args[2])).await,
+        Some("convert") if args.len() >= 3 => {
+            let h264 = args.iter().any(|a| a == "--h264");
+            return match cmd_convert(&args[1], &args[2], h264) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
+        Some("copy") => cmd_copy(udid, &args).await,
         Some("watch") => {
             unspool_device::watch(|p| {
                 let t = chrono_now();
@@ -286,14 +301,18 @@ async fn cmd_library(udid: Option<String>, list: bool, dcim_only: bool) -> Resul
                 .map(|d| format!("{d:.1}s"))
                 .unwrap_or_default();
             out!(
-                "{}\t{when}\t{}\t{dims}\t{dur}\t{}",
+                "{}\t{when}\t{}\t{dims}\t{dur}\t{}\t{}\t{}\t{}\t{}",
                 a.device_path(),
                 if a.kind == MediaKind::Photo {
                     "photo"
                 } else {
                     "video"
                 },
-                flags(a)
+                flags(a),
+                a.source_app.as_deref().unwrap_or("-"),
+                a.camera.as_deref().unwrap_or("-"),
+                a.place.as_deref().unwrap_or("-"),
+                a.albums.join("|")
             );
         }
     }
@@ -311,4 +330,124 @@ fn chrono_now() -> String {
         secs / 60 % 60,
         secs % 60
     )
+}
+
+fn cmd_convert(src: &str, dst: &str, h264: bool) -> Result<(), unspool_convert::ConvertError> {
+    use std::path::Path;
+    let (src, dst) = (Path::new(src), Path::new(dst));
+    let ext = src
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let t = std::time::Instant::now();
+    match ext.as_str() {
+        "heic" | "heif" => {
+            let info =
+                unspool_convert::heic_to_jpeg(src, dst, unspool_convert::DEFAULT_JPEG_QUALITY)?;
+            let (w, h) = unspool_convert::verify_jpeg(dst)?;
+            out!(
+                "{}x{} exif={} icc={} verified={w}x{h} in {:.2}s",
+                info.width,
+                info.height,
+                info.has_exif,
+                info.has_icc,
+                t.elapsed().as_secs_f64()
+            );
+        }
+        _ => {
+            let mode = if h264 {
+                unspool_convert::VideoMode::H264
+            } else {
+                unspool_convert::VideoMode::Remux
+            };
+            let before = unspool_convert::probe(src)?;
+            unspool_convert::to_mp4(src, dst, mode)?;
+            let after = unspool_convert::verify_mp4(dst, before.duration_secs)?;
+            out!(
+                "{before:?} -> {after:?} in {:.2}s",
+                t.elapsed().as_secs_f64()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn flag_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    let i = args.iter().position(|a| a == name)?;
+    args.get(i + 1).map(String::as_str)
+}
+
+/// Copies one month through the same queue the app uses. Conflicts are
+/// skipped unless `--overwrite`.
+async fn cmd_copy(udid: Option<String>, args: &[String]) -> Result<(), DeviceError> {
+    use unspool_queue::{ConflictPolicy, JobState, QueueCommand, QueueEvent, Settings};
+    let usage = || DeviceError::Other("usage: copy --month YYYY-MM --dest DIR".into());
+    let month = flag_value(args, "--month").ok_or_else(usage)?;
+    let (y, m) = month.split_once('-').ok_or_else(usage)?;
+    let (y, m): (i32, u32) = (
+        y.parse().map_err(|_| usage())?,
+        m.parse().map_err(|_| usage())?,
+    );
+    let dest = PathBuf::from(flag_value(args, "--dest").ok_or_else(usage)?);
+
+    let session = open(udid).await?;
+    let udid = session.udid().to_owned();
+    let lib = unspool_library::load(&session, &cache_dir(&udid)).await?;
+    let assets: Vec<Asset> = lib
+        .assets
+        .into_iter()
+        .filter(|a| !a.trashed && a.year_month() == Some((y, m)))
+        .collect();
+    out!("{} items in {y}-{m:02}", assets.len());
+    if assets.is_empty() {
+        return Ok(());
+    }
+
+    let mut settings = Settings::new(dest);
+    settings.on_conflict = if args.iter().any(|a| a == "--overwrite") {
+        ConflictPolicy::Overwrite
+    } else {
+        ConflictPolicy::Skip
+    };
+    if args.iter().any(|a| a == "--h264") {
+        settings.video_mode = unspool_convert::VideoMode::H264;
+    }
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let staging = cache_dir(&udid).join("staging");
+    let q = unspool_queue::spawn(settings, staging, None, tx);
+    q.send(QueueCommand::DeviceReady(udid.clone()));
+    let total = assets.len();
+    q.send(QueueCommand::Add { udid, assets });
+
+    let t = std::time::Instant::now();
+    let mut names = std::collections::HashMap::new();
+    let (mut finished, mut failed) = (0, 0);
+    while let Some(ev) = rx.recv().await {
+        match ev {
+            QueueEvent::Added { id, name, .. } => {
+                names.insert(id, name);
+            }
+            QueueEvent::State { id, state } if state.is_finished() => {
+                finished += 1;
+                if matches!(state, JobState::Failed { .. }) {
+                    failed += 1;
+                }
+                out!(
+                    "{:>3}/{total} {:<14} {state:?}",
+                    finished,
+                    names.get(&id).map_or("?", |s| s.as_str())
+                );
+                if finished == total {
+                    break;
+                }
+            }
+            QueueEvent::Paused { reason: Some(r) } => out!("paused: {r}"),
+            _ => {}
+        }
+    }
+    out!(
+        "{finished} finished, {failed} failed in {:.1}s",
+        t.elapsed().as_secs_f64()
+    );
+    Ok(())
 }

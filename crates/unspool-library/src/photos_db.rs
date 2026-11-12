@@ -4,7 +4,7 @@
 //! runtime: only `ZDIRECTORY` and `ZFILENAME` are required, and every other
 //! field is read when present and left empty otherwise.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
@@ -49,6 +49,8 @@ pub fn read_assets(db_path: &Path) -> Result<Vec<Asset>, DbError> {
     }
     let attrs = columns(&conn, "ZADDITIONALASSETATTRIBUTES").unwrap_or_default();
     let join = attrs.contains("ZASSET");
+    let ext = columns(&conn, "ZEXTENDEDATTRIBUTES").unwrap_or_default();
+    let join_ext = ext.contains("ZASSET");
 
     // Each optional column becomes `NULL` when missing, keeping indexes fixed.
     let col = |name: &str| {
@@ -65,10 +67,19 @@ pub fn read_assets(db_path: &Path) -> Result<Vec<Asset>, DbError> {
             "NULL".to_owned()
         }
     };
+    let extc = |name: &str| {
+        if join_ext && ext.contains(name) {
+            format!("e.{name}")
+        } else {
+            "NULL".to_owned()
+        }
+    };
     let sql = format!(
         "SELECT a.ZDIRECTORY, a.ZFILENAME, {kind}, {subtype}, {date}, {tz}, {w}, {h}, {dur},
-                {fav}, {hidden}, {trashed}, {lat}, {lon}, {size}
-         FROM ZASSET a {join_clause}
+                {fav}, {hidden}, {trashed}, {lat}, {lon}, {size},
+                a.Z_PK, {app}, {place}, {make}, {model}, {lens}, {iso}, {aperture},
+                {shutter}, {focal}
+         FROM ZASSET a {join_clause} {ext_clause}
          WHERE a.ZDIRECTORY IS NOT NULL AND a.ZFILENAME IS NOT NULL
          ORDER BY {order}",
         kind = col("ZKIND"),
@@ -84,6 +95,20 @@ pub fn read_assets(db_path: &Path) -> Result<Vec<Asset>, DbError> {
         lat = col("ZLATITUDE"),
         lon = col("ZLONGITUDE"),
         size = attr("ZORIGINALFILESIZE"),
+        app = attr("ZIMPORTEDBYDISPLAYNAME"),
+        place = attr("ZREVERSELOCATIONDATA"),
+        make = extc("ZCAMERAMAKE"),
+        model = extc("ZCAMERAMODEL"),
+        lens = extc("ZLENSMODEL"),
+        iso = extc("ZISO"),
+        aperture = extc("ZAPERTURE"),
+        shutter = extc("ZSHUTTERSPEED"),
+        focal = extc("ZFOCALLENGTH"),
+        ext_clause = if join_ext {
+            "LEFT JOIN ZEXTENDEDATTRIBUTES e ON e.ZASSET = a.Z_PK"
+        } else {
+            ""
+        },
         join_clause = if join {
             "LEFT JOIN ZADDITIONALASSETATTRIBUTES x ON x.ZASSET = a.Z_PK"
         } else {
@@ -96,18 +121,143 @@ pub fn read_assets(db_path: &Path) -> Result<Vec<Asset>, DbError> {
         },
     );
 
+    let albums = read_albums(&conn).unwrap_or_default();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([], row_to_asset)?;
     let mut out = Vec::new();
     for r in rows {
-        if let Some(asset) = r? {
+        if let Some((pk, mut asset)) = r? {
+            if let Some(names) = albums.get(&pk) {
+                asset.albums = names.clone();
+            }
             out.push(asset);
         }
     }
     Ok(out)
 }
 
-fn row_to_asset(r: &Row<'_>) -> rusqlite::Result<Option<Asset>> {
+/// `Z_<digits><suffix>`: Core Data names join columns by entity number,
+/// which changes between iOS versions (`Z_34ALBUMS`, `Z_3ASSETS` on iOS 27).
+fn is_numbered(col: &str, suffix: &str) -> bool {
+    col.strip_prefix("Z_")
+        .and_then(|r| r.strip_suffix(suffix))
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// User album titles per asset primary key. Finds the album↔asset join
+/// table by its column names; returns an empty map if there is none.
+fn read_albums(conn: &Connection) -> rusqlite::Result<HashMap<i64, Vec<String>>> {
+    let mut out: HashMap<i64, Vec<String>> = HashMap::new();
+    let album_cols = columns(conn, "ZGENERICALBUM").unwrap_or_default();
+    if !album_cols.contains("ZTITLE") || !album_cols.contains("ZKIND") {
+        return Ok(out);
+    }
+    let tables: Vec<String> = conn
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'Z\\_%ASSETS' ESCAPE '\\'",
+        )?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let found = tables.iter().find_map(|t| {
+        let cols = columns(conn, t).ok()?;
+        let album = cols.iter().find(|c| is_numbered(c, "ALBUMS"))?.clone();
+        let asset = cols.iter().find(|c| is_numbered(c, "ASSETS"))?.clone();
+        Some((t.clone(), album, asset))
+    });
+    let Some((table, album_col, asset_col)) = found else {
+        return Ok(out);
+    };
+    let trashed = if album_cols.contains("ZTRASHEDSTATE") {
+        "AND (g.ZTRASHEDSTATE IS NULL OR g.ZTRASHEDSTATE = 0)"
+    } else {
+        ""
+    };
+    // ZKIND 2 = albums the user made (verified on iOS 27).
+    let sql = format!(
+        "SELECT j.{asset_col}, g.ZTITLE FROM {table} j
+         JOIN ZGENERICALBUM g ON g.Z_PK = j.{album_col}
+         WHERE g.ZKIND = 2 AND g.ZTITLE IS NOT NULL {trashed}
+         ORDER BY g.ZTITLE"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+    for row in rows {
+        let (pk, title) = row?;
+        out.entry(pk).or_default().push(title);
+    }
+    Ok(out)
+}
+
+/// The street address in `ZREVERSELOCATIONDATA`, an NSKeyedArchiver plist
+/// whose root object has an `addressString`.
+pub fn place_from_archive(bytes: &[u8]) -> Option<String> {
+    let v = plist::Value::from_reader(std::io::Cursor::new(bytes)).ok()?;
+    let dict = v.as_dictionary()?;
+    let objects = dict.get("$objects")?.as_array()?;
+    fn deref<'a>(objects: &'a [plist::Value], v: &'a plist::Value) -> Option<&'a plist::Value> {
+        match v {
+            plist::Value::Uid(u) => objects.get(u.get() as usize),
+            other => Some(other),
+        }
+    }
+    let top = dict.get("$top")?.as_dictionary()?.get("root")?;
+    let root = deref(objects, top)?.as_dictionary()?;
+    let address = deref(objects, root.get("addressString")?)?
+        .as_string()?
+        .trim();
+    (!address.is_empty()).then(|| address.to_owned())
+}
+
+fn camera_name(make: Option<String>, model: Option<String>) -> Option<String> {
+    let model = model.map(|m| m.trim().to_owned()).filter(|m| !m.is_empty());
+    let make = make.map(|m| m.trim().to_owned()).filter(|m| !m.is_empty());
+    match (make, model) {
+        (Some(make), Some(model)) => {
+            // "EXAMPLE CORPORATION" + "EXAMPLE X100" → "EXAMPLE X100".
+            let brand = make.split_whitespace().next().unwrap_or("");
+            if model.to_lowercase().starts_with(&brand.to_lowercase()) {
+                Some(model)
+            } else {
+                Some(format!("{make} {model}"))
+            }
+        }
+        (None, Some(model)) => Some(model),
+        (Some(make), None) => Some(make),
+        (None, None) => None,
+    }
+}
+
+fn exposure_text(
+    iso: Option<f64>,
+    aperture: Option<f64>,
+    shutter: Option<f64>,
+    focal: Option<f64>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(iso) = iso.filter(|v| *v > 0.0) {
+        parts.push(format!("ISO {}", iso.round() as i64));
+    }
+    if let Some(f) = aperture.filter(|v| *v > 0.0) {
+        parts.push(format!("f/{f:.1}"));
+    }
+    if let Some(s) = shutter.filter(|v| *v > 0.0) {
+        parts.push(if s < 1.0 {
+            format!("1/{} s", (1.0 / s).round() as i64)
+        } else {
+            format!("{s:.1} s")
+        });
+    }
+    if let Some(mm) = focal.filter(|v| *v > 0.0) {
+        let t = format!("{mm:.2}");
+        parts.push(format!(
+            "{} mm",
+            t.trim_end_matches('0').trim_end_matches('.')
+        ));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+fn row_to_asset(r: &Row<'_>) -> rusqlite::Result<Option<(i64, Asset)>> {
     let directory: String = r.get(0)?;
     let filename: String = r.get(1)?;
     let zkind: Option<i64> = r.get(2)?;
@@ -143,7 +293,23 @@ fn row_to_asset(r: &Row<'_>) -> rusqlite::Result<Option<Asset>> {
     a.original_size = r
         .get::<_, Option<i64>>(14)?
         .and_then(|v| u64::try_from(v).ok());
-    Ok(Some(a))
+    let pk: i64 = r.get(15)?;
+    a.source_app = r
+        .get::<_, Option<String>>(16)?
+        .map(|s| {
+            s.trim_matches(|c: char| c.is_whitespace() || c == '\u{200e}')
+                .to_owned()
+        })
+        .filter(|s| !s.is_empty());
+    a.place = r
+        .get::<_, Option<Vec<u8>>>(17)?
+        .and_then(|b| place_from_archive(&b));
+    a.camera = camera_name(r.get(18)?, r.get(19)?);
+    a.lens = r
+        .get::<_, Option<String>>(20)?
+        .filter(|s| !s.trim().is_empty());
+    a.exposure = exposure_text(r.get(21)?, r.get(22)?, r.get(23)?, r.get(24)?);
+    Ok(Some((pk, a)))
 }
 
 fn apple_time(secs: f64) -> Option<DateTime<Utc>> {
@@ -205,6 +371,78 @@ mod tests {
         assert!(v.trashed && !v.live_photo);
         assert_eq!(v.duration_secs, Some(42.5));
         assert_eq!(v.location, None, "-180 means no location");
+    }
+
+    #[test]
+    fn reads_source_camera_place_albums() {
+        let d = db(
+            &format!(
+                "{FULL}
+                ALTER TABLE ZADDITIONALASSETATTRIBUTES ADD COLUMN ZIMPORTEDBYDISPLAYNAME TEXT;
+                CREATE TABLE ZEXTENDEDATTRIBUTES (Z_PK INTEGER PRIMARY KEY, ZASSET INTEGER,
+                    ZCAMERAMAKE TEXT, ZCAMERAMODEL TEXT, ZLENSMODEL TEXT, ZISO INTEGER,
+                    ZAPERTURE REAL, ZSHUTTERSPEED REAL, ZFOCALLENGTH REAL);
+                CREATE TABLE ZGENERICALBUM (Z_PK INTEGER PRIMARY KEY, ZKIND INTEGER, ZTITLE TEXT,
+                    ZTRASHEDSTATE INTEGER);
+                CREATE TABLE Z_33KEYASSETS (Z_33ALBUMSBEINGKEYASSETS INTEGER, Z_3KEYASSETS INTEGER);
+                CREATE TABLE Z_34ASSETS (Z_34ALBUMS INTEGER, Z_3ASSETS INTEGER, Z_FOK_3ASSETS INTEGER);"
+            ),
+            "INSERT INTO ZASSET (Z_PK, ZDIRECTORY, ZFILENAME, ZKIND) VALUES
+                (1,'DCIM/100APPLE','IMG_1.HEIC',0),(2,'DCIM/100APPLE','IMG_2.JPG',0);
+             INSERT INTO ZADDITIONALASSETATTRIBUTES (Z_PK, ZASSET, ZIMPORTEDBYDISPLAYNAME)
+                VALUES (1,1,'Camera'),(2,2,'\u{200e}WhatsApp');
+             INSERT INTO ZEXTENDEDATTRIBUTES VALUES
+                (1,1,'Apple','iPhone 15','iPhone 15 back camera',160,1.6,0.0303,5.96),
+                (2,2,'EXAMPLE CORPORATION','EXAMPLE X100',NULL,NULL,NULL,NULL,NULL);
+             INSERT INTO ZGENERICALBUM VALUES (51,2,'Holiday',0),(52,2,'Trips',0),
+                (53,2,'Old',1),(4,3571,'progress-sync',0);
+             INSERT INTO Z_34ASSETS VALUES (51,1,0),(52,1,0),(53,1,0),(4,1,0);
+             INSERT INTO Z_33KEYASSETS VALUES (52,2);",
+        );
+        let assets = read_assets(&d.path().join("Photos.sqlite")).unwrap();
+        let a = assets.iter().find(|a| a.filename == "IMG_1.HEIC").unwrap();
+        assert_eq!(a.source_app.as_deref(), Some("Camera"));
+        assert_eq!(a.camera.as_deref(), Some("Apple iPhone 15"));
+        assert_eq!(
+            a.exposure.as_deref(),
+            Some("ISO 160 · f/1.6 · 1/33 s · 5.96 mm")
+        );
+        assert_eq!(a.albums, vec!["Holiday".to_owned(), "Trips".to_owned()]);
+        let b = assets.iter().find(|a| a.filename == "IMG_2.JPG").unwrap();
+        assert_eq!(b.source_app.as_deref(), Some("WhatsApp"));
+        assert_eq!(b.camera.as_deref(), Some("EXAMPLE X100"));
+        assert!(
+            b.albums.is_empty(),
+            "key-asset links are not album membership"
+        );
+    }
+
+    #[test]
+    fn decodes_place_archive() {
+        use plist::{Dictionary, Uid, Value};
+        let mut root = Dictionary::new();
+        root.insert("addressString".into(), Value::Uid(Uid::new(2)));
+        let mut top = Dictionary::new();
+        top.insert("root".into(), Value::Uid(Uid::new(1)));
+        let mut archive = Dictionary::new();
+        archive.insert("$top".into(), Value::Dictionary(top));
+        archive.insert(
+            "$objects".into(),
+            Value::Array(vec![
+                Value::String("$null".into()),
+                Value::Dictionary(root),
+                Value::String("1 Example Street, Springfield".into()),
+            ]),
+        );
+        let mut bytes = Vec::new();
+        Value::Dictionary(archive)
+            .to_writer_binary(&mut bytes)
+            .unwrap();
+        assert_eq!(
+            place_from_archive(&bytes).as_deref(),
+            Some("1 Example Street, Springfield")
+        );
+        assert_eq!(place_from_archive(b"junk"), None);
     }
 
     #[test]

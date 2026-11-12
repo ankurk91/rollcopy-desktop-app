@@ -35,6 +35,18 @@ pub struct Asset {
     /// Device path of the edited version (`.../Adjustments/FullSizeRender.*`),
     /// if the item was edited on the phone.
     pub edited_render: Option<String>,
+    /// Where the item came from, from the app that saved it: "Camera",
+    /// "Snapchat", "WhatsApp", "Screenshots", … (Photos DB only).
+    pub source_app: Option<String>,
+    /// Camera make and model from EXIF, e.g. "Apple iPhone 15".
+    pub camera: Option<String>,
+    pub lens: Option<String>,
+    /// Shot settings, e.g. "ISO 160 · f/1.6 · 1/33 s · 5.96 mm".
+    pub exposure: Option<String>,
+    /// Street address the phone looked up for the location.
+    pub place: Option<String>,
+    /// User albums the item is in.
+    pub albums: Vec<String>,
 }
 
 impl Asset {
@@ -55,6 +67,12 @@ impl Asset {
             location: None,
             original_size: None,
             edited_render: None,
+            source_app: None,
+            camera: None,
+            lens: None,
+            exposure: None,
+            place: None,
+            albums: Vec::new(),
         }
     }
 

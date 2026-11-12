@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use unspool_device::{DeviceError, MediaFs, Phase, Session};
 use unspool_library::{Asset, Library};
+use unspool_queue::{History, QueueCommand, QueueEvent, QueueHandle, Settings};
 
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -31,18 +32,23 @@ pub enum Event {
         name: String,
         error: String,
     },
+    Queue(QueueEvent),
 }
 
 #[derive(Debug, Clone)]
 pub enum Command {
     /// Fetch thumbnails; the newest request is served first.
-    Thumbs { udid: String, items: Vec<ThumbReq> },
+    Thumbs {
+        udid: String,
+        items: Vec<ThumbReq>,
+    },
     /// Copy one file to a temp folder and open it with `xdg-open`.
     Open {
         udid: String,
         device_path: String,
         name: String,
     },
+    Queue(QueueCommand),
 }
 
 #[derive(Debug, Clone)]
@@ -53,13 +59,23 @@ pub struct ThumbReq {
     pub dest: PathBuf,
 }
 
-/// Paths under the app cache root (`~/.cache/unspool`).
+/// App directories: cache root (`~/.cache/unspool`) and state directory
+/// (`~/.local/state/unspool`, for the failure history).
 #[derive(Debug, Clone)]
 pub struct CachePaths {
     pub root: PathBuf,
+    pub state: PathBuf,
 }
 
 impl CachePaths {
+    pub fn staging(&self) -> PathBuf {
+        self.root.join("staging")
+    }
+
+    pub fn history(&self) -> PathBuf {
+        self.state.join("history.sqlite")
+    }
+
     pub fn db(&self, udid: &str) -> PathBuf {
         self.root.join("db").join(udid)
     }
@@ -105,8 +121,14 @@ pub fn spawn(paths: CachePaths) -> Worker {
                 .build()
                 .expect("tokio runtime");
             rt.block_on(async move {
-                tokio::spawn(serve_commands(cmd_rx, ev_tx.clone(), paths.clone()));
-                run_watch(ev_tx, paths).await;
+                let queue = start_queue(&paths, ev_tx.clone());
+                tokio::spawn(serve_commands(
+                    cmd_rx,
+                    ev_tx.clone(),
+                    paths.clone(),
+                    queue.clone(),
+                ));
+                run_watch(ev_tx, paths, queue).await;
             });
         })
         .expect("spawn device thread");
@@ -116,7 +138,34 @@ pub fn spawn(paths: CachePaths) -> Worker {
     }
 }
 
-async fn run_watch(tx: async_channel::Sender<Event>, paths: CachePaths) {
+/// Starts the transfer queue and forwards its events to the UI. The UI sends
+/// the real destination with `SetSettings` once it knows the phone's name.
+fn start_queue(paths: &CachePaths, tx: async_channel::Sender<Event>) -> QueueHandle {
+    let (qtx, mut qrx) = tokio::sync::mpsc::unbounded_channel();
+    let history = match History::open(&paths.history()) {
+        Ok(h) => Some(h),
+        Err(e) => {
+            eprintln!("history disabled: {e}");
+            None
+        }
+    };
+    let handle = unspool_queue::spawn(
+        Settings::new(paths.root.join("unset-destination")),
+        paths.staging(),
+        history,
+        qtx,
+    );
+    tokio::spawn(async move {
+        while let Some(ev) = qrx.recv().await {
+            if tx.send(Event::Queue(ev)).await.is_err() {
+                break;
+            }
+        }
+    });
+    handle
+}
+
+async fn run_watch(tx: async_channel::Sender<Event>, paths: CachePaths, queue: QueueHandle) {
     let mut loading: Option<tokio::task::JoinHandle<()>> = None;
     unspool_device::watch(move |phase| {
         // Any change of phase invalidates a library load in progress.
@@ -127,6 +176,12 @@ async fn run_watch(tx: async_channel::Sender<Event>, paths: CachePaths) {
             Phase::Ready { info } => Some(info.udid.clone()),
             _ => None,
         };
+        // The queue pauses on its own when a read fails; this tells it when
+        // it may continue.
+        queue.send(match &ready_udid {
+            Some(u) => QueueCommand::DeviceReady(u.clone()),
+            None => QueueCommand::DeviceGone,
+        });
         // Phase first, so the UI never sees library events for a phone it
         // doesn't know is ready. The UI may have quit; nothing to do then.
         let _ = tx.try_send(Event::Phase(phase));
@@ -173,6 +228,7 @@ async fn serve_commands(
     rx: async_channel::Receiver<Command>,
     tx: async_channel::Sender<Event>,
     paths: CachePaths,
+    transfers: QueueHandle,
 ) {
     // Thumbnail queue, newest first; `queued` de-duplicates keys.
     let mut queue: VecDeque<(String, ThumbReq)> = VecDeque::new();
@@ -194,6 +250,7 @@ async fn serve_commands(
 
         for cmd in incoming {
             match cmd {
+                Command::Queue(cmd) => transfers.send(cmd),
                 Command::Thumbs { udid, items } => {
                     for item in items.into_iter().rev() {
                         if queued.insert(item.key.clone()) {

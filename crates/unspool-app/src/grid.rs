@@ -6,17 +6,19 @@ use std::ops::Range;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::ButtonVariants as _;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use unspool_library::{MediaKind, Source};
 
 use crate::tree::{Selection, month_name};
-use crate::view::{Filter, LEFT_W, LibState, MainView, Thumb, muted};
+use crate::view::{Filter, LEFT_W, LibState, MainView, SyncFilter, Thumb, btn, muted};
 use crate::worker::{Command, ThumbReq, phone_thumb_path};
 
-pub(crate) const TILE: f32 = 132.;
+/// Smallest tile; tiles stretch so each row fills the width.
+pub(crate) const MIN_TILE: f32 = 132.;
 const GAP: f32 = 8.;
 const PAD: f32 = 16.;
 /// Room for the scrollbar so the last column never sits under it.
@@ -24,10 +26,19 @@ const SCROLLBAR: f32 = 14.;
 
 impl MainView {
     /// Tiles per row for the current window width.
-    fn columns(&self, window: &Window) -> usize {
+    /// Tiles per row and tile size for the current window. The grid takes
+    /// the preview pane's room when the pane is closed.
+    fn grid_layout(&self, window: &Window) -> (usize, f32) {
         let width = window.viewport_size().width / px(1.);
-        let avail = width - LEFT_W - self.preview_w - 2. * PAD - SCROLLBAR;
-        (((avail + GAP) / (TILE + GAP)).floor() as usize).max(1)
+        let preview = if self.preview_open {
+            self.preview_w
+        } else {
+            0.
+        };
+        let avail = (width - LEFT_W - preview - 2. * PAD - SCROLLBAR).max(MIN_TILE);
+        let cols = (((avail + GAP) / (MIN_TILE + GAP)).floor() as usize).max(1);
+        let tile = ((avail - GAP * (cols as f32 - 1.)) / cols as f32).floor();
+        (cols, tile)
     }
 
     pub(crate) fn render_grid(
@@ -36,8 +47,12 @@ impl MainView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme().clone();
-        let cols = self.columns(window);
+        if self.counts_dirty {
+            self.recount();
+        }
+        let (cols, tile) = self.grid_layout(window);
         self.cols = cols;
+        self.tile = tile;
         let rows = self.visible.len().div_ceil(cols);
 
         let header = self.render_grid_header(cx).into_any_element();
@@ -51,21 +66,28 @@ impl MainView {
                 .child("Nothing here with this filter.")
                 .into_any_element()
         } else {
-            uniform_list(
-                "grid",
-                rows,
-                cx.processor(move |this, range: Range<usize>, _window, cx| {
-                    this.request_thumbs(range.clone(), cols);
-                    range
-                        .map(|row| this.render_row(row, cols, cx))
-                        .collect::<Vec<_>>()
-                }),
-            )
-            .track_scroll(&self.grid_scroll)
-            .flex_1()
-            .px(px(PAD))
-            .pb(px(PAD))
-            .into_any_element()
+            div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .child(
+                    uniform_list(
+                        "grid",
+                        rows,
+                        cx.processor(move |this, range: Range<usize>, _window, cx| {
+                            this.request_thumbs(range.clone(), cols);
+                            range
+                                .map(|row| this.render_row(row, cols, cx))
+                                .collect::<Vec<_>>()
+                        }),
+                    )
+                    .track_scroll(&self.grid_scroll)
+                    .size_full()
+                    .px(px(PAD))
+                    .pb(px(PAD)),
+                )
+                .vertical_scrollbar(&self.grid_scroll)
+                .into_any_element()
         };
 
         v_flex()
@@ -77,6 +99,11 @@ impl MainView {
 
     fn render_grid_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
+        let copyable = self
+            .visible
+            .iter()
+            .filter(|&&i| !self.assets()[i].trashed)
+            .count();
         let counts = self.filter_counts;
         let count = |f: Filter| counts[f.count_index()];
 
@@ -99,7 +126,7 @@ impl MainView {
 
         let chip = |id: &'static str, label: &str, f: Filter, n: usize, cx: &mut Context<Self>| {
             let active = self.filter == f;
-            Button::new(id)
+            btn(id)
                 .small()
                 .label(format!("{label} {n}"))
                 .when(active, |b| b.primary())
@@ -128,10 +155,41 @@ impl MainView {
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(title),
                     )
-                    .child(muted(summary, &theme)),
+                    .child(muted(summary, &theme))
+                    .child(div().flex_1())
+                    .when(!self.visible.is_empty(), |d| {
+                        d.child(
+                            btn("select-all")
+                                .xsmall()
+                                .ghost()
+                                .label("Select all")
+                                .tooltip("Ctrl+A")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.select_all_visible();
+                                    window.focus(&this.focus, cx);
+                                    cx.notify();
+                                })),
+                        )
+                    })
+                    .when(!self.selected.is_empty(), |d| {
+                        d.child(
+                            btn("clear-selection")
+                                .xsmall()
+                                .ghost()
+                                .label("Clear selection")
+                                .tooltip("Esc")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.selected.clear();
+                                    this.anchor = None;
+                                    window.focus(&this.focus, cx);
+                                    cx.notify();
+                                })),
+                        )
+                    }),
             )
             .child(
                 h_flex()
+                    .flex_wrap()
                     .gap_1()
                     .child(chip("f-all", "All", Filter::All, count(Filter::All), cx))
                     .child(chip(
@@ -154,7 +212,62 @@ impl MainView {
                         Filter::Edited,
                         count(Filter::Edited),
                         cx,
-                    )),
+                    ))
+                    .child(div().w(px(12.)))
+                    .when(self.dest_root().is_some(), |d| {
+                        d.child(sync_chip(
+                            "s-copied",
+                            "Copied",
+                            SyncFilter::Copied,
+                            self.sync_filter,
+                            self.sync_counts[1],
+                            cx,
+                        ))
+                        .child(sync_chip(
+                            "s-not-copied",
+                            "Not copied",
+                            SyncFilter::NotCopied,
+                            self.sync_filter,
+                            self.sync_counts[2],
+                            cx,
+                        ))
+                    })
+                    .child(div().flex_1())
+                    .child(
+                        btn("sort")
+                            .small()
+                            .ghost()
+                            .icon(if self.newest_first {
+                                IconName::ArrowDownWideNarrow
+                            } else {
+                                IconName::ArrowUpNarrowWide
+                            })
+                            .label(if self.newest_first {
+                                "Newest first"
+                            } else {
+                                "Oldest first"
+                            })
+                            .tooltip("Sort by date taken")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.newest_first = !this.newest_first;
+                                this.recompute_visible();
+                                window.focus(&this.focus, cx);
+                                cx.notify();
+                            })),
+                    )
+                    .when(copyable > 0 && self.dest_root().is_some(), |d| {
+                        d.child(
+                            btn("copy-all")
+                                .small()
+                                .outline()
+                                .label(format!("Copy all ({copyable})"))
+                                .tooltip("Copy everything shown here")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.copy_visible();
+                                    cx.notify();
+                                })),
+                        )
+                    }),
             )
             .when(self.selection == Selection::RecentlyDeleted, |d| {
                 d.child(muted(
@@ -171,12 +284,24 @@ impl MainView {
         let Some(udid) = self.udid().map(str::to_owned) else {
             return;
         };
+        let settings = self.copy_settings();
+        // Borrow fields, not `self`, so the caches can be updated in the loop.
+        let LibState::Loaded { library, .. } = &self.library else {
+            return;
+        };
+        let assets = &library.assets;
         let start = rows.start * cols;
         let end = (rows.end * cols).min(self.visible.len());
         let mut wanted = Vec::new();
         for pos in start..end {
-            let a = &self.assets()[self.visible[pos]];
+            let a = &assets[self.visible[pos]];
             let key = a.device_path();
+            if !self.in_dest.contains_key(&key)
+                && let Some(settings) = &settings
+            {
+                let there = unspool_queue::dest_path(settings, a).exists();
+                self.in_dest.insert(key.clone(), there);
+            }
             if self.thumbs.contains_key(&key) {
                 continue;
             }
@@ -204,7 +329,7 @@ impl MainView {
         let start = row * cols;
         let end = (start + cols).min(self.visible.len());
         h_flex()
-            .h(px(TILE + GAP))
+            .h(px(self.tile + GAP))
             .gap(px(GAP))
             .items_start()
             .children((start..end).map(|pos| self.render_tile(pos, cx)))
@@ -253,7 +378,7 @@ impl MainView {
 
         div()
             .id(("tile", pos))
-            .size(px(TILE))
+            .size(px(self.tile))
             .flex_shrink_0()
             .relative()
             .rounded_md()
@@ -284,8 +409,33 @@ impl MainView {
                     .right_1()
                     .gap_1()
                     .when(a.live_photo, |d| d.child(badge("LIVE".into())))
-                    .when(a.is_edited(), |d| d.child(badge("✎".into()))),
+                    .when(a.is_edited(), |d| d.child(badge("EDITED".into()))),
             )
+            // Already in the Save-to folder (from what's on disk, PLAN §7.5).
+            .when(self.in_dest.get(&key) == Some(&true), |d| {
+                d.child(
+                    div()
+                        .id(("copied", pos))
+                        .absolute()
+                        .bottom_1()
+                        .right_1()
+                        .p_0p5()
+                        .rounded_sm()
+                        .bg(hsla(0., 0., 0., 0.6))
+                        .tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(
+                                "Copied: already in the Save to folder",
+                            )
+                            .build(window, cx)
+                        })
+                        .child(Icon::new(IconName::RefreshCw).small().text_color(hsla(
+                            96. / 360.,
+                            0.62,
+                            0.55,
+                            1.,
+                        ))),
+                )
+            })
             .when(selected, |d| {
                 d.child(
                     div()
@@ -318,6 +468,7 @@ impl MainView {
             return;
         };
         self.focused = Some(idx);
+        self.preview_open = true;
         self.status = None;
         if clicks >= 2 {
             self.open_focused();
@@ -366,6 +517,7 @@ impl MainView {
         };
         let idx = self.visible[pos];
         self.focused = Some(idx);
+        self.preview_open = true;
         self.status = None;
         if extend {
             let anchor = self.anchor.or(current).unwrap_or(pos);
@@ -406,4 +558,32 @@ impl MainView {
             name,
         });
     }
+}
+
+/// Copied / Not copied chip; clicking the active one turns the filter off.
+fn sync_chip(
+    id: &'static str,
+    label: &str,
+    f: SyncFilter,
+    current: SyncFilter,
+    n: usize,
+    cx: &mut Context<MainView>,
+) -> impl IntoElement {
+    // `current` is passed in: reading the view here would panic mid-render.
+    let active = current == f;
+    btn(id)
+        .small()
+        .label(format!("{label} {n}"))
+        .when(active, |b| b.primary())
+        .when(!active, |b| b.ghost())
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.sync_filter = if this.sync_filter == f {
+                SyncFilter::All
+            } else {
+                f
+            };
+            this.recompute_visible();
+            window.focus(&this.focus, cx);
+            cx.notify();
+        }))
 }
