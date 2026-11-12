@@ -1,0 +1,15 @@
+[package]
+name = "unspool-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "unspool"
+path = "src/main.rs"
+
+[dependencies]
+gpui-kit.workspace = true

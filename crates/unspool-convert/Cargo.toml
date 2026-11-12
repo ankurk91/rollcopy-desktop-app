@@ -1,0 +1,12 @@
+[package]
+name = "unspool-convert"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Ubuntu 24.04 / Mint 22 ship libheif 1.17.6; the crate's default needs >= 1.23.
+libheif-rs = { version = "=3.0.0", default-features = false, features = ["v1_17"] }
