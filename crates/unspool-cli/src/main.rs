@@ -27,6 +27,7 @@ commands:
   info                 show device info
   ls [PATH]            list a directory on the phone (default /)
   pull PATH DEST       copy one file from the phone to DEST on this computer
+  watch                follow the connection guide (asks to Trust if needed)
   library [--list] [--dcim]
                        read the Photos library (--dcim: skip the database)
 ";
@@ -40,6 +41,14 @@ async fn main() -> ExitCode {
         Some("info") => cmd_info(udid).await,
         Some("ls") => cmd_ls(udid, args.get(1).map_or("/", String::as_str)).await,
         Some("pull") if args.len() == 3 => cmd_pull(udid, &args[1], PathBuf::from(&args[2])).await,
+        Some("watch") => {
+            unspool_device::watch(|p| {
+                let t = chrono_now();
+                out!("{t}  {p:?}")
+            })
+            .await;
+            Ok(())
+        }
         Some("library") => {
             let list = args.iter().any(|a| a == "--list");
             let dcim = args.iter().any(|a| a == "--dcim");
@@ -75,7 +84,9 @@ fn hint(e: &DeviceError) -> Option<&'static str> {
             "plug in your iPhone with a cable (if it is plugged in, check that usbmuxd is installed)"
         }
         DeviceError::NotConnected => "plug in your iPhone with a cable; try another cable or port",
-        DeviceError::NotPaired => "unlock your iPhone and tap Trust, then enter your passcode",
+        DeviceError::NotPaired | DeviceError::StalePairing => {
+            "unlock your iPhone and tap Trust, then enter your passcode (`unspool-cli watch` asks again)"
+        }
         DeviceError::PairingPending => "tap Trust on your iPhone",
         DeviceError::PairingDenied => "unplug and re-plug your iPhone to be asked again",
         DeviceError::Locked => "unlock your iPhone",
@@ -287,4 +298,17 @@ async fn cmd_library(udid: Option<String>, list: bool, dcim_only: bool) -> Resul
         }
     }
     Ok(())
+}
+
+fn chrono_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!(
+        "{:02}:{:02}:{:02}Z",
+        secs / 3600 % 24,
+        secs / 60 % 60,
+        secs % 60
+    )
 }

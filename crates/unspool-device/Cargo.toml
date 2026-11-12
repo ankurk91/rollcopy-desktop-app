@@ -14,4 +14,5 @@ idevice = { version = "=0.1.68", default-features = false, features = ["ring", "
 plist = "1.8"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 thiserror = "2"
-tokio = { version = "1", features = ["fs", "io-util"] }
+tokio = { version = "1", features = ["fs", "io-util", "time", "rt", "macros"] }
+uuid = { version = "1", features = ["v4"] }

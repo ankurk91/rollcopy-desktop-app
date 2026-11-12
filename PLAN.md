@@ -2,7 +2,7 @@
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
-Status: **M0 and M1 done (2026-11-12)**, apart from sending the pair request, which moves to M2 with the Trust screen. Next: M2.
+Status: **M0, M1 and M2 done (2026-11-12).** Next: M3 (thumbnail grid, filters, preview pane).
 
 ---
 
@@ -125,6 +125,10 @@ The app always shows exactly one clear next step. Each state is detected, not gu
 **Locked phone (tested 2026-11-12):** once the phone is trusted and has been unlocked at least once since it started, AFC keeps working while it's locked. Listing, reading a HEIC and reading `Photos.sqlite` all succeeded. So "Unlock your iPhone" is only shown when the phone actually refuses: before the first unlock after a restart, or while waiting for Trust. The app shouldn't nag about the lock screen otherwise. It's not yet known whether the 2026-10-19 I/O errors came from auto-lock or from a bad cable like the one seen today. **M4 must test a long copy with the phone locked.** Until then, the queue keeps pausing on disconnect.
 
 **Tip shown once:** set Auto-Lock to Never during long transfers (drop it if the M4 test shows locking doesn't matter).
+
+**Who sends the pair request (found in M2, 2026-11-12):** usbmuxd 1.1 (Ubuntu 24.04 / Mint 22) pairs by itself when a phone **with no record** on this computer is plugged in. It shows the Trust dialog and saves the record. When the app also sent a request, both ran at once, usbmuxd saved first, and the app's `SavePairRecord` was refused. So:
+- **No record:** wait up to 20 s for usbmuxd's record, showing "tap Trust". Only then send our own request (for systems without usbmuxd's auto-pairing). Tested: unplug → move the record aside → replug → Trust → Ready.
+- **Record exists but the phone rejects it** (`InvalidHostID`, e.g. after an iOS update; seen on the morning of 2026-11-12): usbmuxd doesn't re-pair, so the app sends the request right away. If usbmuxd refuses to save, the stale local record is deleted and the save retried. **Not tested yet:** it needs the phone to forget this computer.
 
 **Bad cable / port signature (seen 2026-11-12):** usbmuxd attaches the device for about a second and then logs "Removed device". After that the kernel logs `device descriptor read/64, error -71` and `unable to enumerate USB device`, and `lsusb` no longer lists Apple (`05ac`). This is a physical link problem, so the app should show "Try another cable or USB port (no hubs)", not the pairing screen. Detect it from a device that appears and disappears within a few seconds.
 

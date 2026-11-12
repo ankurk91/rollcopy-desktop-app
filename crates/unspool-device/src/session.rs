@@ -22,7 +22,7 @@ pub struct DeviceRef {
 
 /// Device facts shown on the device card (PLAN §3). Optional fields are
 /// queries the phone may refuse; their absence is not an error.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DeviceInfo {
     pub udid: String,
     pub name: String,
@@ -176,4 +176,53 @@ fn uint(d: &Dictionary, key: &str) -> Option<u64> {
         v.as_unsigned_integer()
             .or_else(|| v.as_signed_integer().and_then(|i| u64::try_from(i).ok()))
     })
+}
+
+/// Asks the phone to trust this computer and, once the user taps Trust and
+/// enters the passcode, saves the new pair record with usbmuxd (in
+/// `/var/lib/lockdown/`), the same as tapping Trust for Finder or iTunes.
+///
+/// Waits while the Trust dialog is showing, so callers should run it in a
+/// task they can drop (e.g. when the phone is unplugged). Returns
+/// [`DeviceError::PairingDenied`] for Don't Trust and [`DeviceError::Locked`]
+/// when the phone must be unlocked before it can show the dialog.
+pub async fn pair(udid: &str) -> Result<()> {
+    let mut mux = UsbmuxdConnection::default()
+        .await
+        .map_err(usbmuxd_unavailable)?;
+    let device = match mux.get_device(udid).await {
+        Ok(d) => d,
+        Err(idevice::IdeviceError::DeviceNotFound) => return Err(DeviceError::NotConnected),
+        Err(e) => return Err(e.into()),
+    };
+    let buid = mux.get_buid().await?;
+    let provider = device.to_provider(UsbmuxdAddr::default(), LABEL);
+    let mut lockdown = LockdownClient::connect(&provider).await?;
+
+    let host_id = uuid::Uuid::new_v4().to_string().to_uppercase();
+    let host_name = std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .map(|h| h.trim().to_owned())
+        .unwrap_or_else(|_| "Linux".to_owned());
+    let record = lockdown.pair(host_id, buid, Some(&host_name)).await?;
+
+    let bytes = record.serialize()?;
+    let mut mux = UsbmuxdConnection::default()
+        .await
+        .map_err(usbmuxd_unavailable)?;
+    if mux.save_pair_record(udid, bytes.clone()).await.is_ok() {
+        return Ok(());
+    }
+    // usbmuxd refused, e.g. because a record already exists (its own pairing
+    // may have saved one, or an old rejected one is still there). The phone
+    // accepted our record, so replace whatever is on this computer. Only the
+    // local record is touched.
+    let mut mux = UsbmuxdConnection::default()
+        .await
+        .map_err(usbmuxd_unavailable)?;
+    let _ = mux.delete_pair_record(udid).await;
+    let mut mux = UsbmuxdConnection::default()
+        .await
+        .map_err(usbmuxd_unavailable)?;
+    mux.save_pair_record(udid, bytes).await?;
+    Ok(())
 }

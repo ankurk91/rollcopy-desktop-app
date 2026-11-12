@@ -15,10 +15,16 @@ pub enum DeviceError {
     #[error("device is not connected")]
     NotConnected,
 
-    /// No pair record on this computer, or the phone no longer accepts it
-    /// (`InvalidHostID`, e.g. after an iOS update or a privacy reset).
+    /// No pair record for this phone on this computer. usbmuxd 1.1+ starts
+    /// pairing by itself when such a phone is plugged in.
     #[error("this computer is not trusted by the device")]
     NotPaired,
+
+    /// A pair record exists but the phone rejects it (`InvalidHostID`, e.g.
+    /// after an iOS update or a privacy reset). usbmuxd won't re-pair on its
+    /// own in this case.
+    #[error("the device no longer trusts this computer")]
+    StalePairing,
 
     /// A Trust dialog is showing on the phone and hasn't been answered.
     #[error("waiting for Trust to be tapped on the device")]
@@ -58,6 +64,7 @@ impl DeviceError {
             Self::UsbmuxdUnavailable(_)
                 | Self::NotConnected
                 | Self::NotPaired
+                | Self::StalePairing
                 | Self::PairingPending
                 | Self::PairingDenied
                 | Self::Locked
@@ -70,7 +77,7 @@ impl From<IdeviceError> for DeviceError {
     fn from(e: IdeviceError) -> Self {
         use idevice::afc::errors::AfcError;
         match e {
-            IdeviceError::InvalidHostID => Self::NotPaired,
+            IdeviceError::InvalidHostID => Self::StalePairing,
             IdeviceError::PairingDialogResponsePending => Self::PairingPending,
             IdeviceError::UserDeniedPairing => Self::PairingDenied,
             IdeviceError::PasswordProtected | IdeviceError::DeviceLocked => Self::Locked,

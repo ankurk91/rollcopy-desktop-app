@@ -1259,6 +1259,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "directories"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16f5094c54661b38d03bd7e50df373292118db60b585c08a411c6d840017fe7d"
+dependencies = [
+ "dirs-sys 0.5.0",
+]
+
+[[package]]
 name = "dirs"
 version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7054,7 +7063,14 @@ checksum = "ca718471876992059f251e33aafc334346ada08042b7661dd1fe313a9bced557"
 name = "unspool-app"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
+ "chrono",
+ "directories",
  "gpui-kit",
+ "gpui-kit-assets",
+ "tokio",
+ "unspool-device",
+ "unspool-library",
 ]
 
 [[package]]
@@ -7082,6 +7098,7 @@ dependencies = [
  "plist",
  "thiserror 2.0.21",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
