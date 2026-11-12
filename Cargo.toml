@@ -23,3 +23,7 @@ gpui-kit = "=0.9.1"
 
 [profile.dev.package."*"]
 opt-level = 2
+# Match release behaviour for third-party crates: gpui's accessibility code
+# panics on some debug-only checks (e.g. "set_focus called more than once in
+# a single frame" from the settings number input) that only warn in release.
+debug-assertions = false

@@ -53,8 +53,6 @@ pub(crate) struct Transfers {
     pub paused: Option<String>,
     pub expanded: bool,
     pub conflict: Option<ConflictPrompt>,
-    /// Destination chosen per phone (UDID) this session; see PLAN §8a.
-    pub dests: HashMap<String, PathBuf>,
     pub scroll: UniformListScrollHandle,
     /// One-line result of the last panel action ("Exported 3 errors to …").
     pub note: Option<String>,
@@ -74,24 +72,6 @@ impl Transfers {
         }
         (done, failed, active, self.rows.len())
     }
-}
-
-/// Default destination: `~/Pictures/Unspool/<device name>/` (PLAN §7.3).
-pub(crate) fn default_dest(device_name: &str) -> PathBuf {
-    let pictures = directories::UserDirs::new()
-        .and_then(|u| u.picture_dir().map(Path::to_path_buf))
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Pictures")))
-        .unwrap_or_else(|| PathBuf::from("."));
-    let safe: String = device_name
-        .chars()
-        .map(|c| if c == '/' || c == '\0' { '_' } else { c })
-        .collect();
-    let safe = if safe.trim().is_empty() {
-        "iPhone".to_owned()
-    } else {
-        safe
-    };
-    pictures.join("Unspool").join(safe)
 }
 
 fn human_size(bytes: u64) -> String {
@@ -116,26 +96,23 @@ impl MainView {
     // ---- starting copies ---------------------------------------------
 
     /// Current destination for the connected phone.
-    pub(crate) fn dest_root(&self) -> Option<&Path> {
-        self.udid()
-            .and_then(|u| self.transfers.dests.get(u))
-            .map(PathBuf::as_path)
+    /// Save-to folder for the connected phone (PLAN §8a rules, from the
+    /// saved preferences).
+    pub(crate) fn dest_root(&self) -> Option<PathBuf> {
+        match &self.phase {
+            unspool_device::Phase::Ready { info } => {
+                Some(self.config.destination_for(&info.udid, &info.name))
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn copy_settings(&self) -> Option<Settings> {
-        self.dest_root().map(|d| {
-            let mut s = self.settings_base.clone();
-            s.dest = d.to_path_buf();
-            s
-        })
+        self.dest_root().map(|d| self.config.copy_settings(d))
     }
 
-    /// Called when a phone becomes ready: pick its destination and tell the queue.
-    pub(crate) fn on_device_ready(&mut self, udid: &str, name: &str) {
-        self.transfers
-            .dests
-            .entry(udid.to_owned())
-            .or_insert_with(|| default_dest(name));
+    /// Called when a phone becomes ready: tell the queue where to copy.
+    pub(crate) fn on_device_ready(&mut self) {
         self.sync_queue_settings();
     }
 
@@ -219,10 +196,11 @@ impl MainView {
             if let Ok(Ok(Some(paths))) = rx.await
                 && let Some(dir) = paths.into_iter().next()
             {
-                let _ = this.update(cx, |view, cx| {
-                    view.transfers.dests.insert(udid, dir);
-                    view.sync_queue_settings();
-                    cx.notify();
+                // Saved per phone; the Prefs observer re-syncs the view.
+                let _ = this.update(cx, |_, cx| {
+                    crate::prefs::Prefs::update_config(cx, |c| {
+                        c.destination.devices.insert(udid, dir);
+                    });
                 });
             }
         })
@@ -436,7 +414,7 @@ impl MainView {
                         cx.stop_propagation();
                     })),
             )
-            .when_some(self.dest_root().map(Path::to_path_buf), |d, dest| {
+            .when_some(self.dest_root(), |d, dest| {
                 d.child(
                     btn("open-dest")
                         .xsmall()
@@ -675,7 +653,7 @@ impl MainView {
     // ---- toolbar pieces ----------------------------------------------
 
     pub(crate) fn render_save_to(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dest = self.dest_root()?.to_path_buf();
+        let dest = self.dest_root()?;
         let theme = cx.theme().clone();
         let n = self.copyable_selected();
         Some(
@@ -751,15 +729,7 @@ pub(crate) fn state_label(s: &JobState, progress: Option<(u64, u64)>) -> String 
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` macro.
-    use super::{JobState, default_dest, human_size, state_label};
-
-    #[test]
-    fn default_destination_is_per_device() {
-        let d = default_dest("My iPhone");
-        assert!(d.ends_with("Unspool/My iPhone"), "{d:?}");
-        assert!(default_dest("a/b").ends_with("Unspool/a_b"));
-        assert!(default_dest("  ").ends_with("Unspool/iPhone"));
-    }
+    use super::{JobState, human_size, state_label};
 
     #[test]
     fn labels() {

@@ -15,9 +15,18 @@ path = "src/main.rs"
 unspool-device.workspace = true
 unspool-library.workspace = true
 unspool-queue.workspace = true
+unspool-convert.workspace = true
 gpui-kit.workspace = true
 async-channel = "2"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 directories = "6"
 tokio = { version = "1", features = ["rt-multi-thread", "time", "fs", "process"] }
 gpui-kit-assets = "=0.9.1"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.2.1"
+serde_json = "1.0.154"
+semver = "1.0.28"
+ureq = "3.5.2"
+
+[dev-dependencies]
+tempfile = "3.27.0"

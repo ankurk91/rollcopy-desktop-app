@@ -2,7 +2,7 @@
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
-Status: **M0–M3 done (2026-11-12). M4 copy pipeline works on the phone** (a whole month copied and checked file by file). The UI fixes from testing are in. Next: M5 (preferences).
+Status: **M0–M5 done (2026-11-12).** Next: M6 (tray icon, notifications, `.desktop` file).
 
 ---
 
@@ -261,7 +261,7 @@ Opened from ☰ → Preferences… or Ctrl+,. It's a small separate window with 
 | | Subfolder per device | On (`<base>/<device name>/`) |
 | | Folder layout | Year / Month / images·videos, or Flat |
 | | When a file already exists | Ask / Always skip / Always overwrite (default **Ask**) |
-| **Conversion** | JPEG quality for HEIC | 92 |
+| **Conversion** | JPEG quality for HEIC (dropdown of presets 80–100; the number input hit a gpui focus panic in debug builds) | 92 |
 | | Videos | Lossless MP4 (default) / Re-encode to H.264 |
 | **Library** | Show Recently Deleted (greyed, never copied) | On |
 | | Default view | By date / On-phone folders |
@@ -269,7 +269,10 @@ Opened from ☰ → Preferences… or Ctrl+,. It's a small separate window with 
 | | Keep running in tray while copying | On |
 | | Notify when transfers finish | On |
 | | Check for updates on startup (at most once a day) | Off |
+| | Reset and restart (two-step confirm): deletes `config.toml`, `ui.toml` and `history.sqlite`, then restarts. The phone, copied files and the thumbnail cache are untouched | — |
 | **Advanced** | Parallel reads / conversion workers | 2 / auto |
+
+In M5 the window has Destination, Conversion, Library (Show Recently Deleted) and App (Theme, Check for updates on startup). Not there yet: *Default view* (the on-phone folders view isn't built), *Keep running in tray* and *Notify* (they arrive with the tray in M6), and *Advanced* (worker count is fixed at 2; there's no log file yet). The toolbar's 📁 choice is stored under `[destination.devices]` and can be cleared in Preferences → Destination.
 | | Open logs folder (button) | — |
 
 **How preferences are saved:**

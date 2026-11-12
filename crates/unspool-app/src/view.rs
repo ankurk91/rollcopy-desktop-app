@@ -16,6 +16,7 @@ use gpui_kit::*;
 use unspool_device::{DeviceInfo, NoDeviceHint, Phase};
 use unspool_library::{Library, MediaKind};
 
+use crate::prefs::Prefs;
 use crate::theme::{self, ThemeChoice};
 use crate::transfers::Transfers;
 use crate::tree::{LibraryTree, Selection, month_name};
@@ -23,9 +24,8 @@ use crate::worker::{CachePaths, Command, Event, Worker};
 
 const INSTALL_USBMUXD: &str = "sudo apt install usbmuxd";
 pub(crate) const LEFT_W: f32 = 270.;
-/// Default and minimum preview pane width; the grid always keeps room for at
-/// least one column.
-pub(crate) const PREVIEW_W: f32 = 300.;
+/// Minimum preview pane width; the grid always keeps room for at least one
+/// column. (Default width: `UiState::preview_width`.)
 pub(crate) const PREVIEW_MIN_W: f32 = 220.;
 pub(crate) const GRID_MIN_W: f32 = 200.;
 
@@ -43,6 +43,12 @@ actions!(
         ExtendUp,
         ExtendDown,
         OpenItem,
+        OpenPreferences,
+        CheckForUpdates,
+        ViewOnGitHub,
+        ReportIssue,
+        ShowAbout,
+        Quit,
     ]
 );
 
@@ -73,6 +79,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-down", ExtendDown, Some(KEY_CONTEXT)),
         KeyBinding::new("enter", OpenItem, Some(KEY_CONTEXT)),
         KeyBinding::new("space", OpenItem, Some(KEY_CONTEXT)),
+        // App-wide (PLAN §6 ☰ menu).
+        KeyBinding::new("ctrl-,", OpenPreferences, None),
+        KeyBinding::new("ctrl-q", Quit, None),
     ]);
 }
 
@@ -175,16 +184,21 @@ pub struct MainView {
     /// One-line status under the preview ("Opening IMG_0042.MOV…").
     pub(crate) status: Option<String>,
     pub(crate) transfers: Transfers,
-    /// Copy settings other than the destination (PLAN §8a; editable in M5).
-    pub(crate) settings_base: unspool_queue::Settings,
+    /// Copy of the saved preferences, refreshed when they change.
+    pub(crate) config: crate::config::Config,
     /// Whether an item's output file already exists in the destination
     /// (the ✓ badge), by device path. Filled for on-screen tiles.
     pub(crate) in_dest: HashMap<String, bool>,
-    pub(crate) theme_choice: ThemeChoice,
     /// Preview pane shown; opens when an item is selected, × closes it.
     pub(crate) preview_open: bool,
     /// "Copies are still running" prompt on window close.
     pub(crate) quit_prompt: bool,
+    pub(crate) about_open: bool,
+    pub(crate) credits_open: bool,
+    pub(crate) about_note: Option<String>,
+    pub(crate) update_ui: Option<crate::about::UpdateUi>,
+    /// (version, release page) found by the startup check.
+    pub(crate) update_banner: Option<(String, String)>,
     _tasks: Vec<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -209,18 +223,33 @@ impl MainView {
             }
         });
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
-            theme::apply(this.theme_choice, window, cx);
+            theme::apply(this.config.app.theme.into(), window, cx);
+        });
+        // Preferences changed (here or in the Preferences window): apply them.
+        let prefs = cx.observe_global_in::<Prefs>(window, |this, window, cx| {
+            let new = Prefs::get(cx).config.clone();
+            if new.app.theme != this.config.app.theme {
+                theme::apply(new.app.theme.into(), window, cx);
+            }
+            if !new.library.show_recently_deleted && this.selection == Selection::RecentlyDeleted {
+                this.selection = Selection::All;
+            }
+            this.config = new;
+            this.sync_queue_settings();
+            cx.notify();
         });
         // Ask before closing while copies are running (PLAN §6 tray rule; the
-        // tray itself comes in M6).
+        // tray itself comes in M6). Window state is saved on the way out.
         let weak = cx.entity().downgrade();
-        window.on_window_should_close(cx, move |_, cx| {
-            weak.update(cx, |view, cx| view.confirm_close(cx))
+        window.on_window_should_close(cx, move |window, cx| {
+            weak.update(cx, |view, cx| view.confirm_close(window, cx))
                 .unwrap_or(true)
         });
+        let saved_ui = Prefs::get(cx).ui.clone();
+        let config = Prefs::get(cx).config.clone();
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        Self {
+        let mut this = Self {
             paths,
             commands: worker.commands,
             focus,
@@ -243,17 +272,26 @@ impl MainView {
             grid_scroll: UniformListScrollHandle::new(),
             cols: 1,
             tile: crate::grid::MIN_TILE,
-            preview_w: PREVIEW_W,
+            preview_w: saved_ui.preview_width.max(PREVIEW_MIN_W),
             status: None,
-            transfers: Transfers::default(),
-            settings_base: unspool_queue::Settings::new(PathBuf::new()),
+            transfers: Transfers {
+                expanded: saved_ui.transfers_expanded,
+                ..Transfers::default()
+            },
+            config,
             in_dest: HashMap::new(),
-            theme_choice: ThemeChoice::System,
             preview_open: false,
             quit_prompt: false,
+            about_open: false,
+            credits_open: false,
+            about_note: None,
+            update_ui: None,
+            update_banner: None,
             _tasks: vec![task],
-            _subscriptions: vec![appearance],
-        }
+            _subscriptions: vec![appearance, prefs],
+        };
+        this.maybe_check_on_startup(cx);
+        this
     }
 
     fn on_event(&mut self, ev: Event) {
@@ -269,10 +307,9 @@ impl MainView {
                     self.thumbs.clear();
                     self.recompute_visible();
                 }
-                if let Phase::Ready { info } = &p {
-                    let (udid, name) = (info.udid.clone(), info.name.clone());
+                if matches!(p, Phase::Ready { .. }) {
                     self.phase = p;
-                    self.on_device_ready(&udid, &name);
+                    self.on_device_ready();
                 } else {
                     self.phase = p;
                 }
@@ -474,19 +511,22 @@ impl MainView {
             .child(div().w(px(24.)))
             .children(save_to)
             .child(div().flex_1())
+            .child(self.render_app_menu())
             .child(
                 btn("theme-toggle")
                     .xsmall()
                     .ghost()
-                    .icon(match self.theme_choice {
+                    .icon(match ThemeChoice::from(self.config.app.theme) {
                         ThemeChoice::System => IconName::SunMoon,
                         ThemeChoice::Light => IconName::Sun,
                         ThemeChoice::Dark => IconName::Moon,
                     })
-                    .tooltip(self.theme_choice.label())
+                    .tooltip(ThemeChoice::from(self.config.app.theme).label())
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.theme_choice = this.theme_choice.next();
-                        theme::apply(this.theme_choice, window, cx);
+                        // Saved; the Prefs observer applies it.
+                        let next = ThemeChoice::from(this.config.app.theme).next();
+                        Prefs::update_config(cx, |c| c.app.theme = next.into());
+                        let _ = window;
                         cx.notify();
                     })),
             )
@@ -699,16 +739,19 @@ impl MainView {
                 cx,
             ));
         }
-        // Greyed out, never copied (PLAN §6).
-        list.child(self.tree_row(
-            "deleted".into(),
-            None,
-            "Recently Deleted".into(),
-            tree.recently_deleted,
-            Selection::RecentlyDeleted,
-            true,
-            cx,
-        ))
+        // Greyed out, never copied (PLAN §6); can be hidden in Preferences.
+        if self.config.library.show_recently_deleted {
+            list = list.child(self.tree_row(
+                "deleted".into(),
+                None,
+                "Recently Deleted".into(),
+                tree.recently_deleted,
+                Selection::RecentlyDeleted,
+                true,
+                cx,
+            ));
+        }
+        list
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -837,11 +880,31 @@ impl Render for MainView {
                 cx.notify();
             }))
             .on_drag_move(cx.listener(Self::resize_preview))
+            .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
+            .on_action(cx.listener(|this, _: &ShowAbout, _, cx| {
+                this.about_open = true;
+                this.about_note = None;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &CheckForUpdates, _, cx| {
+                this.check_for_updates(true, cx);
+                cx.notify();
+            }))
             .size_full()
             .relative()
             .bg(theme.background)
             .text_color(theme.foreground)
             .child(toolbar)
+            .children(self.render_update_banner(cx))
+            .children(Prefs::get(cx).notice.clone().map(|n| {
+                div()
+                    .w_full()
+                    .px_4()
+                    .py_1()
+                    .text_sm()
+                    .bg(theme.warning.opacity(0.15))
+                    .child(n)
+            }))
             .child(
                 h_flex()
                     .flex_1()
@@ -855,6 +918,8 @@ impl Render for MainView {
             )
             .children(transfers)
             .children(conflict)
+            .children(self.render_about(cx))
+            .children(self.render_update_dialog(cx))
             .children(self.render_quit_prompt(cx))
     }
 }
@@ -1141,9 +1206,39 @@ impl MainView {
             .count()
     }
 
+    /// Saves window size/position, preview width and queue panel state.
+    pub(crate) fn save_ui_state(&self, window: &Window, cx: &mut App) {
+        let bounds = window.window_bounds();
+        let maximized = matches!(
+            bounds,
+            WindowBounds::Maximized(_) | WindowBounds::Fullscreen(_)
+        );
+        let b = bounds.get_bounds();
+        let saved = crate::config::SavedBounds {
+            x: b.origin.x / px(1.),
+            y: b.origin.y / px(1.),
+            width: b.size.width / px(1.),
+            height: b.size.height / px(1.),
+            maximized,
+        };
+        let (preview, expanded) = (self.preview_w, self.transfers.expanded);
+        Prefs::update_ui(cx, |ui| {
+            ui.window = Some(saved);
+            ui.preview_width = preview;
+            ui.transfers_expanded = expanded;
+        });
+    }
+
+    /// Quit after saving window state.
+    pub(crate) fn quit(&self, window: &Window, cx: &mut App) {
+        self.save_ui_state(window, cx);
+        cx.quit();
+    }
+
     /// Window close requested: allow it, or show the "still copying" prompt.
-    fn confirm_close(&mut self, cx: &mut Context<Self>) -> bool {
+    fn confirm_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.unfinished_transfers() == 0 {
+            self.save_ui_state(window, cx);
             return true;
         }
         self.quit_prompt = true;
@@ -1192,7 +1287,7 @@ impl MainView {
                         btn("quit-anyway")
                             .danger()
                             .label("Quit")
-                            .on_click(|_, _, cx| cx.quit()),
+                            .on_click(cx.listener(|this, _, window, cx| this.quit(window, cx))),
                     ),
             );
         Some(
