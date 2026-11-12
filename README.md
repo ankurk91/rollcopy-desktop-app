@@ -1,6 +1,8 @@
-# Rollcopy
+# Rollcopy: copy iPhone photos and videos to Linux
 
 [![CI](https://github.com/ankurk91/rollcopy-desktop-app/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ankurk91/rollcopy-desktop-app/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/ankurk91/rollcopy-desktop-app)](https://github.com/ankurk91/rollcopy-desktop-app/releases/latest)
+[![Licence: MIT](https://img.shields.io/github/license/ankurk91/rollcopy-desktop-app)](LICENSE)
 
 A **Linux desktop app** that copies photos and videos from an iPhone over a USB cable, as files any
 Android phone, PC or TV can open. No iTunes, no cloud, no account.
@@ -8,6 +10,8 @@ Android phone, PC or TV can open. No iTunes, no cloud, no account.
 Plug in the phone, tap **Trust**, pick what you want, and Rollcopy copies it to
 `~/Pictures/Rollcopy/<phone name>/YYYY/MM/images|videos/`, converting HEIC to JPG and MOV to MP4
 on the way.
+
+![Rollcopy on Linux Mint: an iPhone photo library by year and month, a thumbnail grid with Live, edited and video badges, the preview pane with camera details, and the transfer queue](.github/screenshot.png)
 
 > **Status:** early (0.1.0). Linux only, tested on Linux Mint 22 (Cinnamon, X11) with iOS 27.
 
@@ -109,6 +113,26 @@ packaging/install-local.sh --uninstall
   *☰ → About → Credits → Copy debug info* copies version and system details for a bug report.
 
 Please report problems at [Issues](https://github.com/ankurk91/rollcopy-desktop-app/issues).
+
+## FAQ
+
+**How do I transfer photos from an iPhone to Ubuntu or Linux Mint?**
+Install Rollcopy, connect the iPhone with a USB cable, tap **Trust** on the phone, select the photos
+and click **Copy selected**. No iTunes, iCloud or Apple account is needed.
+
+**Can it convert HEIC to JPG?**
+Yes, while copying. HEIC photos become JPG (quality 92 by default, colour profile and EXIF kept) and
+MOV videos become MP4. JPG, PNG and MP4 files are copied unchanged.
+
+**Does it copy Live Photos and edited photos?**
+Edited photos and videos are copied as edited. Live Photos are copied as the still photo.
+
+**Does it work on Fedora, Arch or other distributions?**
+The `.deb` is for Ubuntu 24.04+ and its derivatives. The AppImage may run on other 64-bit distributions
+with glibc 2.39 or newer, with `usbmuxd` and `ffmpeg` installed; this isn't tested yet.
+
+**Can it delete photos from the iPhone or free up space?**
+No. Rollcopy only reads from the phone; it never changes or deletes anything on it.
 
 ## Where Rollcopy keeps things
 
