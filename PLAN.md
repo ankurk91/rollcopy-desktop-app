@@ -2,7 +2,7 @@
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
-Status: **M0–M5 done (2026-11-12).** Next: M6 (tray icon, notifications, `.desktop` file).
+Status: **M0–M6 done (2026-11-12).** Next: M7 (polish, first GitHub release, packaging).
 
 ---
 
@@ -204,8 +204,10 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 **Tray icon (ksni)**
 - The icon changes with status: idle / device connected / copying (progress tooltip) / error.
 - Menu: Show Unspool · `<device name>` · Pause/Resume · Quit.
-- Closing the window keeps the app in the tray **only while a copy is running**. Otherwise it quits. Until the tray exists (M6), closing during a copy asks "Copies are still running: Keep copying / Quit".
-- Optional desktop notification when a queue finishes.
+- Closing the window keeps the app in the tray **only while a copy is running**. Otherwise it quits. As built in M6: closing during a copy **minimises the window** (gpui can't hide windows on Linux) and sends a "still copying" notification. *Show Unspool* or a click on the icon brings it back. When the copies finish it notifies and **stays in the tray** (changed 2026-11-12 at the user's request; quitting there also cut off the notification). Quit from the tray menu, or bring the window back and close it. With no tray host, or with the preference off, closing asks "Copies are still running: Keep copying / Quit".
+- Checked 2026-11-12: Linux Mint Cinnamon has `xapp-sn-watcher` (StatusNotifierWatcher) and the xapp-status applet, and the icon shows in the top panel.
+- Optional desktop notification when a queue finishes, only when Unspool isn't the active window (preference, on by default).
+- Notifications also cover pause and resume (including a disconnect pause). They are sent over **one D-Bus connection kept open for the app's lifetime**: Cinnamon deletes an app's notifications as soon as their sender disconnects (`_onNameVanished` in notificationDaemon.js), so a connection per notification played the sound but showed nothing. `UNSPOOL_DEBUG_NOTIFY=1` sends a test notification at startup.
 
 **Copy actions**
 - **One item:** the Copy button in the preview pane.
@@ -325,7 +327,7 @@ A small modal opened from ☰ → About Unspool:
 ## 9. Icon
 
 - Placeholder: **Tabler Icons `device-mobile-down`** (MIT, © Paweł Kuna). Saved in `assets/icons/` with its licence file.
-- At build time, render PNGs (16/32/48/64/128/256) for the tray, window and `.desktop` file. Tray variants are the same glyph with a small status dot.
+- As built in M6: `packaging/icons/dev.unspool.Unspool.svg` is the glyph in white on a rounded blue square. It's used by the `.desktop` file and notifications, and is rasterised at runtime with `resvg` for the tray (22/32/48 px, plus a green/blue/red status dot). No build-time PNGs needed.
 - Replace it with a custom icon before any public release.
 
 ## 10. Repo layout (planned)
@@ -340,7 +342,7 @@ unspool/
 │   ├── unspool-queue/    # transfer jobs, history db, retry
 │   └── unspool-app/      # gpui UI + ksni tray (binary: unspool)
 ├── assets/icons/
-├── packaging/            # .desktop file, udev notes, later .deb/AppImage
+├── packaging/            # .desktop file, app icon SVG, install-local.sh (~/.local, --uninstall); later .deb/AppImage
 └── PLAN.md
 ```
 

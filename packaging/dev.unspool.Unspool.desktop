@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Unspool
+GenericName=iPhone Photo Copier
+Comment=Copy photos and videos from your iPhone to this computer over USB
+Exec=unspool
+Icon=dev.unspool.Unspool
+Terminal=false
+Categories=Graphics;Photography;
+Keywords=iPhone;iPad;photos;videos;HEIC;import;copy;
+StartupNotify=true
+StartupWMClass=dev.unspool.Unspool

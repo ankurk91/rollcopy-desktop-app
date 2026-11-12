@@ -375,7 +375,7 @@ impl MainView {
                         })),
                 )
             })
-            .when(active > 0, |d| {
+            .when(active > 0 || paused.is_some(), |d| {
                 let is_paused = paused.is_some();
                 d.child(
                     btn("pause")
@@ -439,6 +439,21 @@ impl MainView {
             panel = panel.child(div().px_4().pb_1().child(muted(note, &theme)));
         }
         if t.expanded {
+            // Column headings, same widths as the rows below.
+            panel = panel.child(
+                h_flex()
+                    .px_4()
+                    .pb_1()
+                    .gap_3()
+                    .text_xs()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.muted_foreground)
+                    .child(div().w(px(14.)))
+                    .child(div().w(px(130.)).flex_shrink_0().child("File"))
+                    .child(div().w(px(120.)).flex_shrink_0().child("Folder"))
+                    .child(div().flex_1().child("Status"))
+                    .child(div().w(px(110.)).flex_shrink_0().child("Finished")),
+            );
             panel = panel.child(
                 div()
                     .relative()

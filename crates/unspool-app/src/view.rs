@@ -199,6 +199,16 @@ pub struct MainView {
     pub(crate) update_ui: Option<crate::about::UpdateUi>,
     /// (version, release page) found by the startup check.
     pub(crate) update_banner: Option<(String, String)>,
+    tray_tx: async_channel::Sender<crate::tray::TrayState>,
+    /// A tray host accepted the icon (closing can then hide to the tray).
+    tray_available: bool,
+    last_tray: Option<crate::tray::TrayState>,
+    /// The window was closed during a copy and is waiting in the tray.
+    closed_to_tray: bool,
+    /// Copies were queued or running at the last event.
+    was_active: bool,
+    /// Pause state last reported by notification.
+    notified_pause: Option<String>,
     _tasks: Vec<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -211,10 +221,13 @@ impl MainView {
         cx: &mut Context<Self>,
     ) -> Self {
         let events = worker.events;
-        let task = cx.spawn(async move |this, cx| {
+        let tray_tx = worker.tray;
+        // `spawn_in` so event handling can reach the window (tray "Show").
+        let task = cx.spawn_in(window, async move |this, cx| {
             while let Ok(ev) = events.recv().await {
-                let alive = this.update(cx, |view, cx| {
-                    view.on_event(ev);
+                let alive = this.update_in(cx, |view, window, cx| {
+                    view.on_event(ev, window, cx);
+                    view.after_event(window);
                     cx.notify();
                 });
                 if alive.is_err() {
@@ -287,6 +300,12 @@ impl MainView {
             about_note: None,
             update_ui: None,
             update_banner: None,
+            tray_tx,
+            tray_available: false,
+            last_tray: None,
+            closed_to_tray: false,
+            was_active: false,
+            notified_pause: None,
             _tasks: vec![task],
             _subscriptions: vec![appearance, prefs],
         };
@@ -294,8 +313,10 @@ impl MainView {
         this
     }
 
-    fn on_event(&mut self, ev: Event) {
+    fn on_event(&mut self, ev: Event, window: &mut Window, cx: &mut Context<Self>) {
         match ev {
+            Event::TrayAvailable(ok) => self.tray_available = ok,
+            Event::Tray(action) => self.on_tray_action(action, window, cx),
             Event::Phase(p) => {
                 eprintln!("phase: {}", phase_label(&p));
                 let same_phone = p.udid().is_some() && p.udid() == self.phase.udid();
@@ -1235,11 +1256,22 @@ impl MainView {
         cx.quit();
     }
 
-    /// Window close requested: allow it, or show the "still copying" prompt.
+    /// Window close requested: allow it, hide to the tray while copying, or
+    /// show the "still copying" prompt when there's no tray.
     fn confirm_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.unfinished_transfers() == 0 {
             self.save_ui_state(window, cx);
             return true;
+        }
+        if self.tray_available && self.config.app.keep_in_tray {
+            self.closed_to_tray = true;
+            self.save_ui_state(window, cx);
+            window.minimize_window();
+            crate::notify::send(
+                "Unspool is still copying",
+                "It keeps going in the tray. Click the tray icon to bring it back.",
+            );
+            return false;
         }
         self.quit_prompt = true;
         cx.notify();
@@ -1303,5 +1335,133 @@ impl MainView {
                 .child(card)
                 .into_any_element(),
         )
+    }
+}
+
+impl MainView {
+    /// Runs after every worker event: tray state, finished-batch handling.
+    fn after_event(&mut self, window: &Window) {
+        self.sync_tray();
+        // Pause/resume (from the tray, the window, or a disconnect) notifies
+        // when Unspool isn't in front.
+        if self.transfers.paused != self.notified_pause {
+            let in_background = self.closed_to_tray || !window.is_window_active();
+            if self.config.app.notify_when_done && in_background {
+                match &self.transfers.paused {
+                    Some(reason) => crate::notify::send("Copying paused", reason.clone()),
+                    None => crate::notify::send("Copying resumed", String::new()),
+                }
+            }
+            self.notified_pause = self.transfers.paused.clone();
+        }
+        let active = self.unfinished_transfers() > 0;
+        if self.was_active && !active {
+            self.on_batch_finished(window);
+        }
+        self.was_active = active;
+    }
+
+    fn on_batch_finished(&mut self, window: &Window) {
+        use unspool_queue::JobState;
+        let rows = &self.transfers.rows;
+        let copied = rows
+            .iter()
+            .filter(|r| matches!(r.state, JobState::Done | JobState::Overwritten))
+            .count();
+        let failed = rows
+            .iter()
+            .filter(|r| matches!(r.state, JobState::Failed { .. }))
+            .count();
+        let in_background = self.closed_to_tray || !window.is_window_active();
+        if self.config.app.notify_when_done && in_background {
+            let mut body = format!("{copied} copied");
+            if failed > 0 {
+                body.push_str(&format!(" · {failed} failed"));
+            }
+            if let Some(dest) = self.dest_root() {
+                body.push_str(&format!("\n{}", dest.display()));
+            }
+            crate::notify::send("Transfers finished", body);
+        }
+        // Closed during the copy: Unspool stays in the tray (decided
+        // 2026-11-12). Quitting here used to cut off the notification.
+    }
+
+    fn on_tray_action(
+        &mut self,
+        action: crate::tray::TrayAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::tray::TrayAction;
+        match action {
+            TrayAction::Show => {
+                self.closed_to_tray = false;
+                window.activate_window();
+            }
+            TrayAction::TogglePause => {
+                let cmd = if self.transfers.paused.is_some() {
+                    unspool_queue::QueueCommand::Resume
+                } else {
+                    unspool_queue::QueueCommand::Pause
+                };
+                let _ = self.commands.try_send(crate::worker::Command::Queue(cmd));
+            }
+            TrayAction::Quit => self.quit(window, cx),
+        }
+    }
+
+    /// Sends the tray what it should show, if that changed.
+    fn sync_tray(&mut self) {
+        use crate::tray::{TrayState, TrayStatus};
+        use unspool_queue::JobState;
+        let rows = &self.transfers.rows;
+        let unfinished = self.unfinished_transfers();
+        let failed = rows
+            .iter()
+            .filter(|r| matches!(r.state, JobState::Failed { .. }))
+            .count();
+        let done = rows.iter().filter(|r| r.state.is_finished()).count();
+        let device = match &self.phase {
+            Phase::Ready { info } => Some(info.name.clone()),
+            _ => None,
+        };
+        let (status, detail) = if unfinished > 0 {
+            let current = rows
+                .iter()
+                .find(|r| {
+                    matches!(
+                        r.state,
+                        JobState::Reading | JobState::Converting | JobState::Verifying
+                    )
+                })
+                .map(|r| format!(" · {}", r.name))
+                .unwrap_or_default();
+            let line = match &self.transfers.paused {
+                Some(reason) => format!("Paused: {reason}"),
+                None => format!("Copying {done} of {}{current}", rows.len()),
+            };
+            (TrayStatus::Copying, line)
+        } else if failed > 0 {
+            (
+                TrayStatus::Error,
+                format!("{failed} item(s) failed to copy"),
+            )
+        } else if let Some(name) = &device {
+            (TrayStatus::Connected, format!("{name} connected"))
+        } else {
+            (TrayStatus::Idle, "No iPhone connected".to_owned())
+        };
+        let state = TrayState {
+            status,
+            detail,
+            device,
+            active: unfinished > 0,
+            paused: self.transfers.paused.is_some(),
+        };
+        if self.last_tray.as_ref() != Some(&state) {
+            let _ = self.tray_tx.try_send(state.clone());
+            self.last_tray = Some(state);
+        }
     }
 }

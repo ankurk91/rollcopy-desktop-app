@@ -104,12 +104,27 @@ impl Default for LibraryPrefs {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppPrefs {
     pub theme: ThemePref,
     /// At most once a day (PLAN §8c); off by default.
     pub check_updates_on_startup: bool,
+    /// Closing the window while copying keeps Unspool in the tray (PLAN §6).
+    pub keep_in_tray: bool,
+    /// Desktop notification when a batch of copies finishes.
+    pub notify_when_done: bool,
+}
+
+impl Default for AppPrefs {
+    fn default() -> Self {
+        Self {
+            theme: ThemePref::System,
+            check_updates_on_startup: false,
+            keep_in_tray: true,
+            notify_when_done: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

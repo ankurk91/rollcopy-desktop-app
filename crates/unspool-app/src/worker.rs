@@ -33,6 +33,9 @@ pub enum Event {
         error: String,
     },
     Queue(QueueEvent),
+    /// Whether a tray host accepted the icon.
+    TrayAvailable(bool),
+    Tray(crate::tray::TrayAction),
 }
 
 #[derive(Debug, Clone)]
@@ -106,12 +109,15 @@ pub fn phone_thumb_path(a: &Asset) -> String {
 pub struct Worker {
     pub events: async_channel::Receiver<Event>,
     pub commands: async_channel::Sender<Command>,
+    /// Tray status updates from the UI.
+    pub tray: async_channel::Sender<crate::tray::TrayState>,
 }
 
 /// Starts the worker thread.
 pub fn spawn(paths: CachePaths) -> Worker {
     let (ev_tx, ev_rx) = async_channel::unbounded();
     let (cmd_tx, cmd_rx) = async_channel::unbounded();
+    let (tray_tx, tray_rx) = async_channel::unbounded();
     std::thread::Builder::new()
         .name("unspool-device".into())
         .spawn(move || {
@@ -121,6 +127,14 @@ pub fn spawn(paths: CachePaths) -> Worker {
                 .build()
                 .expect("tokio runtime");
             rt.block_on(async move {
+                crate::notify::start();
+                if std::env::var_os("UNSPOOL_DEBUG_NOTIFY").is_some() {
+                    crate::notify::send(
+                        "Unspool notification test",
+                        "If you can read this, notifications work.",
+                    );
+                }
+                start_tray(tray_rx, ev_tx.clone());
                 let queue = start_queue(&paths, ev_tx.clone());
                 tokio::spawn(serve_commands(
                     cmd_rx,
@@ -135,7 +149,28 @@ pub fn spawn(paths: CachePaths) -> Worker {
     Worker {
         events: ev_rx,
         commands: cmd_tx,
+        tray: tray_tx,
     }
+}
+
+/// Starts the tray icon and forwards its menu actions to the UI.
+fn start_tray(
+    updates: async_channel::Receiver<crate::tray::TrayState>,
+    tx: async_channel::Sender<Event>,
+) {
+    let (act_tx, act_rx) = async_channel::unbounded();
+    let tx2 = tx.clone();
+    tokio::spawn(async move {
+        let ok = crate::tray::run(updates, act_tx).await;
+        let _ = tx2.send(Event::TrayAvailable(ok)).await;
+    });
+    tokio::spawn(async move {
+        while let Ok(a) = act_rx.recv().await {
+            if tx.send(Event::Tray(a)).await.is_err() {
+                break;
+            }
+        }
+    });
 }
 
 /// Starts the transfer queue and forwards its events to the UI. The UI sends

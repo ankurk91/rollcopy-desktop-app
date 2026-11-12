@@ -3,11 +3,14 @@
 mod about;
 mod config;
 mod grid;
+mod icons;
+mod notify;
 mod prefs;
 mod prefs_window;
 mod preview;
 mod theme;
 mod transfers;
+mod tray;
 mod tree;
 mod update;
 mod view;

@@ -251,6 +251,31 @@ fn pages() -> Vec<SettingPage> {
                     )
                     .description("At most once a day. Only shows something when an update exists."),
                 )
+                .item(
+                    SettingItem::new(
+                        "Keep running in tray while copying",
+                        SettingField::switch(
+                            |cx| Prefs::get(cx).config.app.keep_in_tray,
+                            |v, cx| Prefs::update_config(cx, |c| c.app.keep_in_tray = v),
+                        ),
+                    )
+                    .description(
+                        "Closing the window during a copy keeps Unspool in the tray, and it \
+                         stays there after the copies finish. Quit from the tray menu.",
+                    ),
+                )
+                .item(
+                    SettingItem::new(
+                        "Notify about transfers",
+                        SettingField::switch(
+                            |cx| Prefs::get(cx).config.app.notify_when_done,
+                            |v, cx| Prefs::update_config(cx, |c| c.app.notify_when_done = v),
+                        ),
+                    )
+                    .description(
+                        "When copies finish, pause or resume, and Unspool isn't the active window.",
+                    ),
+                )
                 .item(SettingItem::render(|_, _, cx| reset_row(cx)).description(
                     "Back to defaults: preferences, window layout, error history and \
                              the thumbnail cache. Your phone and copied files aren't touched.",
