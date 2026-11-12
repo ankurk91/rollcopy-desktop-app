@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# System packages needed to build Unspool on Ubuntu 24.04 (CI and fresh machines).
+# System packages needed to build Rollcopy on Ubuntu 24.04 (CI and fresh machines).
 set -euo pipefail
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \

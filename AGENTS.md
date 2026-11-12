@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Notes for AI coding agents working on Unspool. Humans: see [README.md](README.md).
+Notes for AI coding agents working on Rollcopy. Humans: see [README.md](README.md).
 
 ## Project
 
@@ -8,13 +8,13 @@ Linux desktop app (Rust, [gpui](https://github.com/zed-industries/zed) via `gpui
 videos from an iPhone over USB. The plan, decisions and findings are in [PLAN.md](PLAN.md); read it first.
 
 ```
-crates/unspool-device   usbmuxd/lockdown/AFC: listing, pairing, device info, read-only file access
-crates/unspool-library  Photos.sqlite reader, DCIM fallback, item model
-crates/unspool-convert  HEIC→JPG (libheif), MOV→MP4 (ffmpeg), checks
-crates/unspool-queue    copy jobs, conflicts, retry, failure history
-crates/unspool-app      gpui UI, tray, preferences (binary: unspool)
-crates/unspool-cli      headless CLI for testing the crates above
-packaging/              .desktop file, icon, install script, AppImage/deb helpers
+crates/rollcopy-device   usbmuxd/lockdown/AFC: listing, pairing, device info, read-only file access
+crates/rollcopy-library  Photos.sqlite reader, DCIM fallback, item model
+crates/rollcopy-convert  HEIC→JPG (libheif), MOV→MP4 (ffmpeg), checks
+crates/rollcopy-queue    copy jobs, conflicts, retry, failure history
+crates/rollcopy-app      gpui UI, tray, preferences (binary: rollcopy)
+crates/rollcopy-cli      headless CLI for testing the crates above
+packaging/               .desktop file, icon, install script, AppImage/deb helpers
 ```
 
 ## Commands
@@ -23,8 +23,8 @@ packaging/              .desktop file, icon, install script, AppImage/deb helper
 cargo fmt --all
 cargo clippy --workspace --all-targets   # must be warning-free
 cargo test --workspace
-cargo run -p unspool-app                 # the app
-cargo run -p unspool-cli -- info         # needs a connected, trusted iPhone
+cargo run -p rollcopy-app                 # the app
+cargo run -p rollcopy-cli -- info         # needs a connected, trusted iPhone
 ```
 
 System packages are listed in the README (Building from source).

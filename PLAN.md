@@ -1,4 +1,4 @@
-# Unspool — plan
+# Rollcopy — plan
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
@@ -8,11 +8,15 @@ Status: **M0–M6 done. M7 in progress**: CI and release workflows, `.deb` (carg
 
 ## 1. Name
 
-**Unspool**: you plug in the cable and the media unspools from the phone onto the disk.
+**Rollcopy**: copy your camera roll.
 
-- Generic enough to cover phone media, and later Android.
-- Not taken on crates.io (checked 2026-11-12).
-- Binary `unspool`, app id `dev.unspool.Unspool`.
+- Renamed from *Unspool* before the first release (2026-11-12): unspool.app is an unreleased macOS
+  photo app (it adds metadata to scanned film photos), so the names would compete in search.
+- Checked 2026-11-12: free on crates.io and GitHub; the only other use found was an old shell script;
+  rollcopy.com/.app/.dev had no DNS records. Rejected: Tuxroll (a dice maker uses @tuxroll),
+  Tuxpix (too close to the Tuxpi photo editor), Rolldock (a shipping company), Rollferry (.com taken).
+- The name avoids Apple trademarks ("i…", "iPhone"); "iPhone" goes in descriptions for search.
+- Binary `rollcopy`, app id `io.github.ankurk91.Rollcopy`, repo `github.com/ankurk91/rollcopy-desktop-app`.
 
 ## 2. Goal and scope
 
@@ -29,7 +33,7 @@ Status: **M0–M6 done. M7 in progress**: CI and release workflows, `.deb` (carg
 
 ## 2a. Hard rule: never lose data on the phone
 
-Decided 2026-11-12. In v1, Unspool is **read-only towards the iPhone**:
+Decided 2026-11-12. In v1, Rollcopy is **read-only towards the iPhone**:
 
 - AFC is only used to list, stat and read. The device wrapper doesn't expose write, rename, remove or mkdir at all, so the rest of the app can't call them by mistake.
 - `Photos.sqlite` and its `-wal`/`-shm` files are copied to the laptop first and opened from there, read-only. The phone's copy is never opened in place.
@@ -41,7 +45,7 @@ Decided 2026-11-12. In v1, Unspool is **read-only towards the iPhone**:
 
 You asked what the "p2p" connection can do. It's actually two protocols. Both were used in the manual transfer on 2026-10-19.
 
-| Protocol | What it is | What we get | Use in Unspool |
+| Protocol | What it is | What we get | Use in Rollcopy |
 |---|---|---|---|
 | **PTP** (Picture Transfer Protocol) | The camera-style view the file manager shows as "iPhone" | Photos only, in month folders. The phone converts HEIC to JPG on the fly, but Live Photo clips often fail with I/O errors. | **Not used.** It's slow, flaky, and gives no metadata. |
 | **AFC over usbmuxd + lockdown** | Apple's file and service protocol, used by `ifuse` and `ideviceinfo` | Raw `DCIM/` files, the Photos library database, edited versions, and device info | **The main route.** |
@@ -87,12 +91,12 @@ The database is optional. If it can't be read, fall back to plain `DCIM/` browsi
 | MOV → MP4 | `ffmpeg` command-line tool, run as a subprocess | Lossless remux: `-c copy -tag:v hvc1 -movflags +faststart`. Optional H.264 re-encode setting. |
 | Thumbnails | **iOS's own** `PhotoData/Thumbnails/V2/<dir>/<file>/5005.JPG` (found in M3) | Present for every item on iOS 27, photos and videos: 480×360 for photos, 640×360 for videos, about 50–85 KB each. Copied once into the thumbnail cache. No HEIC decoding and no video copy is needed for the grid or the preview. Fallback when it's missing: a type icon. ffmpeg / libheif thumbnails only if a phone turns out not to have them. |
 | Tray icon | **ksni 0.3.x** (StatusNotifierItem over D-Bus) | gpui has no tray support. On Cinnamon the tray applet must be enabled. |
-| Preferences | `serde` + `toml` → `~/.config/unspool/config.toml` (path from the `directories` crate) | See §8a |
-| Job history | `rusqlite` → `~/.local/state/unspool/history.sqlite` | |
+| Preferences | `serde` + `toml` → `~/.config/rollcopy/config.toml` (path from the `directories` crate) | See §8a |
+| Job history | `rusqlite` → `~/.local/state/rollcopy/history.sqlite` | |
 | Folder picker | gpui's `prompt_for_paths` (uses the XDG desktop portal on Linux) | Fallback: `rfd` |
 | Update check | `ureq` (rustls) + `semver` | GitHub Releases API, see §8c |
 | Open links / files | `open` crate (`xdg-open`) | GitHub page, release page, video player |
-| Thumbnail cache | `~/.cache/unspool/thumbs/<udid>/` | |
+| Thumbnail cache | `~/.cache/rollcopy/thumbs/<udid>/` | |
 
 ## 5. Connection guide
 
@@ -140,7 +144,7 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
-│ ⬇ Unspool   [ Save to: ~/Pictures/Unspool/My iPhone  📁 ]  [Copy selected (12)]  ☰ │
+│ ⬇ Rollcopy   [ Save to: ~/Pictures/Rollcopy/My iPhone  📁 ]  [Copy selected (12)]  ☰ │
 ├───────────────────┬───────────────────────────────────────┬───────────────────┤
 │ DEVICES           │  All media ▸ 2025 ▸ September          │  PREVIEW          │
 │ ● My iPhone  │  [Photos][Videos][Edited][All]  🔍     │  ┌─────────────┐  │
@@ -163,13 +167,13 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 ```
 
 **Toolbar**
-- **Save to**: shows the destination folder for the selected device. 📁 opens a folder picker. The default is `~/Pictures/Unspool/<device name>/`, and the choice is remembered (§8a).
+- **Save to**: shows the destination folder for the selected device. 📁 opens a folder picker. The default is `~/Pictures/Rollcopy/<device name>/`, and the choice is remembered (§8a).
 - **☰ app menu**:
   - Preferences… (Ctrl+,)
   - Check for Updates…
   - View on GitHub
   - Report an Issue (opens GitHub Issues)
-  - About Unspool
+  - About Rollcopy
   - Quit (Ctrl+Q)
 
 **Left pane: devices and library**
@@ -186,7 +190,7 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 - Keyboard (added in M3 at the user's request): ← → ↑ ↓ move the focused item and update the preview, Shift+arrows extend the selection, Space / Enter open the item.
 - The preview pane is resizable by dragging its left edge (220 px minimum; the grid keeps at least one column). Its width isn't saved yet; that comes with `ui.toml` in M5.
 - Right-click menu: Copy, Copy folder, Show info.
-- Thumbnails are virtualised and lazy-loaded. A 5,000-item library must scroll smoothly. Only rows on screen are built, and only their thumbnails are requested, newest request first. `UNSPOOL_DEV_REPEAT=N` repeats the library N times to test this with a small phone.
+- Thumbnails are virtualised and lazy-loaded. A 5,000-item library must scroll smoothly. Only rows on screen are built, and only their thumbnails are requested, newest request first. `ROLLCOPY_DEV_REPEAT=N` repeats the library N times to test this with a small phone.
 - Double-click a tile opens it like "Open" (the system viewer). In-app fullscreen with ← / → is not built yet.
 - Not handled yet: the cached thumbnail isn't refreshed if an item is edited on the phone after it was cached.
 
@@ -203,11 +207,11 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 
 **Tray icon (ksni)**
 - The icon changes with status: idle / device connected / copying (progress tooltip) / error.
-- Menu: Show Unspool · `<device name>` · Pause/Resume · Quit.
-- Closing the window keeps the app in the tray **only while a copy is running**. Otherwise it quits. As built in M6: closing during a copy **minimises the window** (gpui can't hide windows on Linux) and sends a "still copying" notification. *Show Unspool* or a click on the icon brings it back. When the copies finish it notifies and **stays in the tray** (changed 2026-11-12 at the user's request; quitting there also cut off the notification). Quit from the tray menu, or bring the window back and close it. With no tray host, or with the preference off, closing asks "Copies are still running: Keep copying / Quit".
+- Menu: Show Rollcopy · `<device name>` · Pause/Resume · Quit.
+- Closing the window keeps the app in the tray **only while a copy is running**. Otherwise it quits. As built in M6: closing during a copy **minimises the window** (gpui can't hide windows on Linux) and sends a "still copying" notification. *Show Rollcopy* or a click on the icon brings it back. When the copies finish it notifies and **stays in the tray** (changed 2026-11-12 at the user's request; quitting there also cut off the notification). Quit from the tray menu, or bring the window back and close it. With no tray host, or with the preference off, closing asks "Copies are still running: Keep copying / Quit".
 - Checked 2026-11-12: Linux Mint Cinnamon has `xapp-sn-watcher` (StatusNotifierWatcher) and the xapp-status applet, and the icon shows in the top panel.
-- Optional desktop notification when a queue finishes, only when Unspool isn't the active window (preference, on by default).
-- Notifications also cover pause and resume (including a disconnect pause). They are sent over **one D-Bus connection kept open for the app's lifetime**: Cinnamon deletes an app's notifications as soon as their sender disconnects (`_onNameVanished` in notificationDaemon.js), so a connection per notification played the sound but showed nothing. `UNSPOOL_DEBUG_NOTIFY=1` sends a test notification at startup.
+- Optional desktop notification when a queue finishes, only when Rollcopy isn't the active window (preference, on by default).
+- Notifications also cover pause and resume (including a disconnect pause). They are sent over **one D-Bus connection kept open for the app's lifetime**: Cinnamon deletes an app's notifications as soon as their sender disconnects (`_onNameVanished` in notificationDaemon.js), so a connection per notification played the sound but showed nothing. `ROLLCOPY_DEBUG_NOTIFY=1` sends a test notification at startup.
 
 **Copy actions**
 - **One item:** the Copy button in the preview pane.
@@ -219,7 +223,7 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 These are the rules proven in the manual transfer, turned into code.
 
 1. **Pick the source.** Use the edited version (`FullSizeRender.*`) if it exists, otherwise the original.
-2. **Convert to compatible formats** (`unspool-convert`; checked on real files 2026-11-12):
+2. **Convert to compatible formats** (`rollcopy-convert`; checked on real files 2026-11-12):
    - HEIC → JPG keeps the Display P3 ICC profile, Make/Model, the capture time with its offset, and GPS. The pixels are rotated by libheif, so the EXIF orientation is reset to 1. A 12 MP photo takes about 2.6 s in a debug build.
    - MOV → MP4 keeps creation time, GPS and Make, maps only video and audio (iPhone MOVs carry five Apple data tracks), tags HEVC as `hvc1`, and drops the Dolby Vision box, leaving plain HLG.
    - JPG / PNG / GIF / MP4 → copied byte for byte.
@@ -227,7 +231,7 @@ These are the rules proven in the manual transfer, turned into code.
    - MOV (HEVC) → MP4 by lossless remux. Preference: "Re-encode to H.264 for old devices" (off by default).
    - **iPhone videos are HDR** (checked 2026-11-12): HEVC Main 10, HLG (`arib-std-b67`), BT.2020, Dolby Vision profile 8.4. Celluloid (mpv) on this laptop played one in **black and white**, while ffmpeg decodes it in full colour. A lossless remux keeps the HDR. **Decided 2026-11-12: Lossless stays the default.** The MP4 is correct: it decodes in colour with ffmpeg (software and VA-API), VLC, Android and iPhone; only Celluloid shows it in black and white. The user plays videos in VLC. The H.264 option stays as a preference (M5) for old devices. It's slow in software (about 1 min per 20 s clip because of the float tone-map); **use VA-API (`tonemap_vaapi` + `h264_vaapi`) on the Intel Arc** before offering it in Preferences. Try dropping the Dolby Vision metadata and keeping only the HLG layer. The H.264 option should also tone-map to SDR: `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p` gave correct colours.
    - Live Photos → **still only, always.** The motion clip is never copied. There's no setting for it.
-3. **Arrange the destination** as `<dest>/<YYYY>/<MM>/images|videos/<IMG_xxxx>.<ext>`, using the capture date in its own time zone. `<dest>` defaults to `~/Pictures/Unspool/<device name>/`. A flat-folder layout is available as a preference.
+3. **Arrange the destination** as `<dest>/<YYYY>/<MM>/images|videos/<IMG_xxxx>.<ext>`, using the capture date in its own time zone. `<dest>` defaults to `~/Pictures/Rollcopy/<device name>/`. A flat-folder layout is available as a preference.
 4. **Write safely:** write to `<name>.part`, check it (size for straight copies; decodes for converted files), then rename. Set the file's modified time to the capture date. On overwrite, the old file is only replaced at the final rename, so a failed copy never destroys it.
 5. **If the file already exists** at the destination path, show a dialog:
 
@@ -248,7 +252,7 @@ These are the rules proven in the manual transfer, turned into code.
 
 ## 8. Error tracking
 
-- Each failed item is saved with time, device, source path, stage (read / convert / write / verify), error text and retry count. History goes to `~/.local/state/unspool/history.sqlite`.
+- Each failed item is saved with time, device, source path, stage (read / convert / write / verify), error text and retry count. History goes to `~/.local/state/rollcopy/history.sqlite`.
 - The queue shows a red badge with the failed count. Clicking it filters the queue to failures.
 - "Export error report" saves a CSV for support or debugging.
 - Disconnects pause the queue instead of failing items (§5). Real per-file failures, such as a corrupt file or ffmpeg errors, are retried once automatically and then left for the user.
@@ -259,7 +263,7 @@ Opened from ☰ → Preferences… or Ctrl+,. It's a small separate window with 
 
 | Section | Setting | Default |
 |---|---|---|
-| **Destination** | Base folder | `~/Pictures/Unspool/` |
+| **Destination** | Base folder | `~/Pictures/Rollcopy/` |
 | | Subfolder per device | On (`<base>/<device name>/`) |
 | | Folder layout | Year / Month / images·videos, or Flat |
 | | When a file already exists | Ask / Always skip / Always overwrite (default **Ask**) |
@@ -278,20 +282,20 @@ In M5 the window has Destination, Conversion, Library (Show Recently Deleted) an
 | | Open logs folder (button) | — |
 
 **How preferences are saved:**
-- File: `~/.config/unspool/config.toml`. Each preference carries a default (`serde(default)`), so a file from an older version still loads. Unknown keys are ignored.
+- File: `~/.config/rollcopy/config.toml`. Each preference carries a default (`serde(default)`), so a file from an older version still loads. Unknown keys are ignored.
 - Writes go to a temp file that is then renamed into place, so a crash never leaves a half-written config.
 - If the file is broken, rename it to `config.toml.bad`, start with defaults, and show a one-line notice.
-- Window size and position, the last selected device, and the queue collapsed/expanded state are also remembered, in a separate file: `~/.local/state/unspool/ui.toml`.
+- Window size and position, the last selected device, and the queue collapsed/expanded state are also remembered, in a separate file: `~/.local/state/rollcopy/ui.toml`.
 - A destination folder you choose with 📁 in the toolbar is saved per device (keyed by UDID). Otherwise the base + device-name default is used.
 
 ## 8b. About dialog
 
-A small modal opened from ☰ → About Unspool:
+A small modal opened from ☰ → About Rollcopy:
 
 ```
 ┌─────────────────────────────────────────┐
 │               [icon 96px]               │
-│                Unspool                  │
+│                Rollcopy                  │
 │          Version 0.1.0 (a1b2c3d)        │
 │  Copy photos and videos from your       │
 │  iPhone to Linux over a USB cable.      │
@@ -310,12 +314,12 @@ A small modal opened from ☰ → About Unspool:
 ## 8c. Check for updates
 
 - **Trigger:** manual, from ☰ or the About dialog. Optionally also on startup, once a day at most (preference, off by default).
-- **Request:** `GET https://api.github.com/repos/ankurk91/unspool-desktop-app/releases/latest` with header `User-Agent: Unspool/<version>`. No token is needed.
+- **Request:** `GET https://api.github.com/repos/ankurk91/rollcopy-desktop-app/releases/latest` with header `User-Agent: Rollcopy/<version>`. No token is needed.
 - **Compare** the release `tag_name` (e.g. `v0.2.0`, with the leading `v` stripped) with the running version using `semver`. Drafts and pre-releases are ignored, because `/releases/latest` already excludes them.
 
 | Result | What the user sees |
 |---|---|
-| Newer release | "Unspool 0.2.0 is available (you have 0.1.0)" + release notes (first ~20 lines of the release body) + **[Download]** → opens the release page in the browser |
+| Newer release | "Rollcopy 0.2.0 is available (you have 0.1.0)" + release notes (first ~20 lines of the release body) + **[Download]** → opens the release page in the browser |
 | Same or older | "You're on the latest version (0.1.0)" |
 | No releases yet (404) | "No releases published yet" |
 | Offline / timeout (10 s) / rate-limited (403/429) | "Couldn't check for updates — try again later" + reason under "Details" |
@@ -327,26 +331,26 @@ A small modal opened from ☰ → About Unspool:
 ## 9. Icon
 
 - Placeholder: **Tabler Icons `device-mobile-down`** (MIT, © Paweł Kuna). Saved in `assets/icons/` with its licence file.
-- As built in M6: `packaging/icons/dev.unspool.Unspool.svg` is the glyph in white on a rounded blue square. It's used by the `.desktop` file and notifications, and is rasterised at runtime with `resvg` for the tray (22/32/48 px, plus a green/blue/red status dot). No build-time PNGs needed.
+- As built in M6: `packaging/icons/io.github.ankurk91.Rollcopy.svg` is the glyph in white on a rounded blue square. It's used by the `.desktop` file and notifications, and is rasterised at runtime with `resvg` for the tray (22/32/48 px, plus a green/blue/red status dot). No build-time PNGs needed.
 - Replace it with a custom icon before any public release.
 
 ## 10. Repo layout (planned)
 
 ```
-unspool/
+rollcopy/
 ├── Cargo.toml            # workspace
 ├── crates/
-│   ├── unspool-device/   # usbmuxd/lockdown/AFC wrapper, device info, pairing state machine
-│   ├── unspool-library/  # Photos.sqlite reader, DCIM fallback, item model
-│   ├── unspool-convert/  # HEIC→JPG, MOV→MP4, thumbnails
-│   ├── unspool-queue/    # transfer jobs, history db, retry
-│   └── unspool-app/      # gpui UI + ksni tray (binary: unspool)
+│   ├── rollcopy-device/   # usbmuxd/lockdown/AFC wrapper, device info, pairing state machine
+│   ├── rollcopy-library/  # Photos.sqlite reader, DCIM fallback, item model
+│   ├── rollcopy-convert/  # HEIC→JPG, MOV→MP4, thumbnails
+│   ├── rollcopy-queue/    # transfer jobs, history db, retry
+│   └── rollcopy-app/      # gpui UI + ksni tray (binary: rollcopy)
 ├── assets/icons/
 ├── packaging/            # .desktop file, app icon SVG, install-local.sh (~/.local, --uninstall); later .deb/AppImage
 └── PLAN.md
 ```
 
-The device, library, convert and queue crates have no UI dependency, so they can be tested headless with a small CLI (`unspool-cli ls`, `unspool-cli info`).
+The device, library, convert and queue crates have no UI dependency, so they can be tested headless with a small CLI (`rollcopy-cli ls`, `rollcopy-cli info`).
 
 ## 11. Later (v2+)
 
@@ -360,7 +364,7 @@ The device, library, convert and queue crates have no UI dependency, so they can
 | # | Deliverable | Done when |
 |---|---|---|
 | M0 | System packages, workspace skeleton, gpui "hello window" on this laptop | Window opens on X11 Cinnamon |
-| M1 | `unspool-device` + CLI: list devices, pairing flow, device info, AFC listing, Photos DB read | `unspool-cli info` and `ls` match what `ideviceinfo`/`ifuse` showed |
+| M1 | `rollcopy-device` + CLI: list devices, pairing flow, device info, AFC listing, Photos DB read | `rollcopy-cli info` and `ls` match what `ideviceinfo`/`ifuse` showed |
 | M2 | Window: device card, connection guide screens, library tree | Plug / unplug / Trust each show the right screen |
 | M3 | Thumbnail grid, filters, preview pane, info panel | Smooth scroll over the whole library |
 | M4 | Copy pipeline + queue panel + error history | Copying a whole month gives the same output as the 2026-10-19 `final/` folder |
@@ -376,7 +380,7 @@ The device, library, convert and queue crates have no UI dependency, so they can
 - Already present: build-essential, pkg-config, libssl-dev, libxkbcommon-dev, libwayland-dev, libxcb1-dev, libfontconfig-dev, libfreetype-dev, libzstd-dev, libdbus-1-dev, Vulkan (Intel Arc), usbmuxd, ffmpeg.
 - Installed for M0 (confirmed 2026-11-12): clang, cmake, libxkbcommon-x11-dev, libx11-xcb-dev, libheif-dev.
 - Needed from M4: `libde265-dev` (already present) and **`libnuma-dev`** (`sudo apt install libnuma-dev`). The bundled libheif links x265, and x265's static link needs `-lnuma`.
-- The system libheif is 1.17.6. It builds, but it's **too old for iOS 27 photos** (see §4). Unspool now uses the bundled libheif 1.23 instead.
+- The system libheif is 1.17.6. It builds, but it's **too old for iOS 27 photos** (see §4). Rollcopy now uses the bundled libheif 1.23 instead.
 - The usbmuxd socket (`/var/run/usbmuxd`) only exists while an Apple device is plugged in, because udev starts the daemon on demand. The connection guide (§5) must not treat a missing socket as "usbmuxd not installed" on its own. Check whether the binary is installed too.
 
 ## 14. Risks and open questions
@@ -389,11 +393,11 @@ The device, library, convert and queue crates have no UI dependency, so they can
 - **GNOME/Cinnamon auto-mounts the phone** (gvfs gphoto2/afc). This blocks PTP but not AFC over usbmuxd. Watch for conflicts.
 
 **Decided (2026-11-12)**
-- Destination: the user picks it. Default `~/Pictures/Unspool/<device name>/`.
+- Destination: the user picks it. Default `~/Pictures/Rollcopy/<device name>/`.
 - Live Photos: always stills. No motion clip, no setting.
 - Existing files: Ask → Skip / Overwrite, with "do this for all", based on the destination folder only.
 - Preferences window with saved settings, an About dialog, a GitHub menu item, and Check for updates via GitHub Releases.
 
 **Open questions for you**
-1. ~~GitHub repo URL~~: `github.com/ankurk91/unspool-desktop-app` (from the git remote).
+1. ~~GitHub repo URL~~: `github.com/ankurk91/rollcopy-desktop-app` (from the git remote).
 2. ~~App licence~~: **MIT** (decided 2026-11-12, `LICENSE` file in the repo root).

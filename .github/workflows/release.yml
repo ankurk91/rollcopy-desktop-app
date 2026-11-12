@@ -14,6 +14,12 @@ on:
 permissions:
   contents: write
 
+# One release run at a time; a new run waits for the running one instead of
+# cancelling it (a cancelled run could leave a half-made draft release).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -21,8 +27,11 @@ jobs:
   package:
     name: .deb + AppImage (Ubuntu 24.04, amd64)
     runs-on: ubuntu-24.04
+    # Tests, a release build and packaging take ~35–45 min on a cold cache;
+    # fail stuck runs early instead of using the 6-hour default.
+    timeout-minutes: 75
     steps:
-      - name: Check out the code
+      - name: Checkout the code
         uses: actions/checkout@v7
 
       - name: Check the tag is semver and matches Cargo.toml
@@ -51,12 +60,12 @@ jobs:
         run: cargo test --workspace
 
       - name: Build the release binary
-        run: cargo build --release -p unspool-app
+        run: cargo build --release -p rollcopy-app
 
       - name: Build the .deb package
         run: |
           cargo install cargo-deb --version 3.8.0 --locked
-          cargo deb -p unspool-app --no-build
+          cargo deb -p rollcopy-app --no-build
           mkdir -p dist
           cp target/debian/*.deb dist/
 
@@ -70,7 +79,7 @@ jobs:
       - name: Upload packages as a workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: unspool-packages
+          name: rollcopy-packages
           path: dist/*
 
       - name: Create a draft GitHub release

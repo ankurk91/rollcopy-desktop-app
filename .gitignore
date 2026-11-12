@@ -5,7 +5,7 @@
 *.AppImage
 *.deb
 
-# Unspool working files
+# Rollcopy working files
 *.part
 
 # Editors and OS

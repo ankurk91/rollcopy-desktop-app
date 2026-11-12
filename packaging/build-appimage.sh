@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Builds dist/Unspool-<version>-x86_64.AppImage from the release binary,
+# Builds dist/Rollcopy-<version>-x86_64.AppImage from the release binary,
 # using a pinned, checksummed linuxdeploy. Runs in CI and locally.
 #
 # The AppImage still needs these on the host (they can't be bundled):
 #   usbmuxd (system daemon, talks to the phone) and ffmpeg (video conversion).
 set -euo pipefail
 
-ID=dev.unspool.Unspool
+ID=io.github.ankurk91.Rollcopy
 LINUXDEPLOY_TAG=1-alpha-20251107-1
 LINUXDEPLOY_SHA256=c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
 
@@ -15,10 +15,10 @@ VERSION="${VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | h
 TOOLS="$ROOT/target/appimage-tools"
 APPDIR="$ROOT/target/AppDir"
 OUT="$ROOT/dist"
-BIN="$ROOT/target/release/unspool"
+BIN="$ROOT/target/release/rollcopy"
 
 if [[ ! -x "$BIN" ]]; then
-    cargo build --release -p unspool-app --manifest-path "$ROOT/Cargo.toml"
+    cargo build --release -p rollcopy-app --manifest-path "$ROOT/Cargo.toml"
 fi
 
 mkdir -p "$TOOLS" "$OUT"

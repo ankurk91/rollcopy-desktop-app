@@ -1,12 +1,12 @@
-# Unspool
+# Rollcopy
 
-[![CI](https://github.com/ankurk91/unspool-desktop-app/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ankurk91/unspool-desktop-app/actions/workflows/ci.yml)
+[![CI](https://github.com/ankurk91/rollcopy-desktop-app/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ankurk91/rollcopy-desktop-app/actions/workflows/ci.yml)
 
-Copy photos and videos from an iPhone to Linux over a USB cable, as files any Android phone,
-PC or TV can open.
+A **Linux desktop app** that copies photos and videos from an iPhone over a USB cable, as files any
+Android phone, PC or TV can open. No iTunes, no cloud, no account.
 
-Plug in the phone, tap **Trust**, pick what you want, and Unspool copies it to
-`~/Pictures/Unspool/<phone name>/YYYY/MM/images|videos/`, converting HEIC to JPG and MOV to MP4
+Plug in the phone, tap **Trust**, pick what you want, and Rollcopy copies it to
+`~/Pictures/Rollcopy/<phone name>/YYYY/MM/images|videos/`, converting HEIC to JPG and MOV to MP4
 on the way.
 
 > **Status:** early (0.1.0). Linux only, tested on Linux Mint 22 (Cinnamon, X11) with iOS 27.
@@ -26,12 +26,12 @@ on the way.
   You choose Ask / Skip / Overwrite for files that already exist.
 - **Transfer queue** with progress, pause/resume, retry and an exportable error report. Unplugging
   or locking the phone pauses the queue instead of failing items.
-- **Tray icon and notifications**: closing the window during a copy keeps Unspool running in the tray.
+- **Tray icon and notifications**: closing the window during a copy keeps Rollcopy running in the tray.
 - **Preferences** for the destination, folder layout, JPEG quality, video format and theme.
 
 ### Your phone is safe
 
-Unspool **only reads** from the phone. It has no code to write, rename or delete anything on the
+Rollcopy **only reads** from the phone. It has no code to write, rename or delete anything on the
 device. The only change it makes is the trust record created when you tap **Trust**, the same as
 connecting to a Mac or PC.
 
@@ -56,19 +56,19 @@ latest release. Nothing is uploaded.
 ## Install
 
 Download the latest `.deb` or `.AppImage` from
-[Releases](https://github.com/ankurk91/unspool-desktop-app/releases).
+[Releases](https://github.com/ankurk91/rollcopy-desktop-app/releases).
 
 **.deb** (installs `usbmuxd` and `ffmpeg` if needed):
 
 ```sh
-sudo apt install ./unspool_0.1.0-1_amd64.deb
+sudo apt install ./rollcopy_0.1.0-1_amd64.deb
 ```
 
 **AppImage** (install `usbmuxd` and `ffmpeg` first, see Requirements):
 
 ```sh
-chmod +x Unspool-0.1.0-x86_64.AppImage
-./Unspool-0.1.0-x86_64.AppImage
+chmod +x Rollcopy-0.1.0-x86_64.AppImage
+./Rollcopy-0.1.0-x86_64.AppImage
 ```
 
 **From source** for your user only (see [Building from source](#building-from-source)):
@@ -108,15 +108,15 @@ packaging/install-local.sh --uninstall
 - **Something failed:** the transfer panel shows the reason. *Export error report* saves a CSV;
   *☰ → About → Credits → Copy debug info* copies version and system details for a bug report.
 
-Please report problems at [Issues](https://github.com/ankurk91/unspool-desktop-app/issues).
+Please report problems at [Issues](https://github.com/ankurk91/rollcopy-desktop-app/issues).
 
-## Where Unspool keeps things
+## Where Rollcopy keeps things
 
 | Path | What |
 |---|---|
-| `~/.config/unspool/config.toml` | Preferences |
-| `~/.local/state/unspool/` | Window layout, failed-copy history |
-| `~/.cache/unspool/` | Thumbnails, copies of the Photos database (safe to delete) |
+| `~/.config/rollcopy/config.toml` | Preferences |
+| `~/.local/state/rollcopy/` | Window layout, failed-copy history |
+| `~/.cache/rollcopy/` | Thumbnails, copies of the Photos database (safe to delete) |
 
 *Preferences → App → Reset and restart* clears all three (never your copied files or the phone).
 
@@ -131,10 +131,10 @@ packaging/ci-deps.sh      # build-essential cmake clang libxkbcommon-dev libde26
 Then, with Rust stable from [rustup](https://rustup.rs):
 
 ```sh
-cargo run -p unspool-app                      # run the app
+cargo run -p rollcopy-app                      # run the app
 cargo test --workspace                        # tests
 cargo clippy --workspace --all-targets        # lints
-cargo deb -p unspool-app                      # .deb (needs cargo-deb 3.8)
+cargo deb -p rollcopy-app                      # .deb (needs cargo-deb 3.8)
 packaging/build-appimage.sh                   # AppImage
 ```
 

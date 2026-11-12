@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Installs Unspool for the current user (no sudo) into ~/.local:
-#   ~/.local/bin/unspool
-#   ~/.local/share/applications/dev.unspool.Unspool.desktop
-#   ~/.local/share/icons/hicolor/scalable/apps/dev.unspool.Unspool.svg
+# Installs Rollcopy for the current user (no sudo) into ~/.local:
+#   ~/.local/bin/rollcopy
+#   ~/.local/share/applications/io.github.ankurk91.Rollcopy.desktop
+#   ~/.local/share/icons/hicolor/scalable/apps/io.github.ankurk91.Rollcopy.svg
 # Usage: packaging/install-local.sh            build (release) and install
 #        packaging/install-local.sh --uninstall remove those three files
 set -euo pipefail
 
-ID=dev.unspool.Unspool
+ID=io.github.ankurk91.Rollcopy
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$HOME/.local/bin/unspool"
+BIN="$HOME/.local/bin/rollcopy"
 APPS="$HOME/.local/share/applications"
 ICONS="$HOME/.local/share/icons/hicolor/scalable/apps"
 
@@ -22,12 +22,12 @@ refresh() {
 if [[ "${1:-}" == "--uninstall" ]]; then
     rm -f "$BIN" "$APPS/$ID.desktop" "$ICONS/$ID.svg"
     refresh
-    echo "Unspool removed (settings and cache are kept in ~/.config, ~/.local/state, ~/.cache)."
+    echo "Rollcopy removed (settings and cache are kept in ~/.config, ~/.local/state, ~/.cache)."
     exit 0
 fi
 
-cargo build --release -p unspool-app --manifest-path "$ROOT/Cargo.toml"
-install -Dm755 "$ROOT/target/release/unspool" "$BIN"
+cargo build --release -p rollcopy-app --manifest-path "$ROOT/Cargo.toml"
+install -Dm755 "$ROOT/target/release/rollcopy" "$BIN"
 install -Dm644 "$ROOT/packaging/$ID.desktop" "$APPS/$ID.desktop"
 install -Dm644 "$ROOT/packaging/icons/$ID.svg" "$ICONS/$ID.svg"
 refresh

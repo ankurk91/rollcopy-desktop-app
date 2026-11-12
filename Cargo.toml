@@ -7,14 +7,14 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT"
-repository = "https://github.com/ankurk91/unspool-desktop-app"
+repository = "https://github.com/ankurk91/rollcopy-desktop-app"
 publish = false
 
 [workspace.dependencies]
-unspool-device = { path = "crates/unspool-device" }
-unspool-library = { path = "crates/unspool-library" }
-unspool-convert = { path = "crates/unspool-convert" }
-unspool-queue = { path = "crates/unspool-queue" }
+rollcopy-device = { path = "crates/rollcopy-device" }
+rollcopy-library = { path = "crates/rollcopy-library" }
+rollcopy-convert = { path = "crates/rollcopy-convert" }
+rollcopy-queue = { path = "crates/rollcopy-queue" }
 
 # UI: gpui-kit bundles gpui-component 0.9.x with `gpui-pre` (a crates.io snapshot
 # of Zed's gpui, pinned =0.3.12 by gpui-kit) and the Linux X11/Wayland platform.

@@ -5613,6 +5613,89 @@ dependencies = [
 ]
 
 [[package]]
+name = "rollcopy-app"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "chrono",
+ "directories",
+ "gpui-kit",
+ "gpui-kit-assets",
+ "ksni",
+ "resvg 0.50.0",
+ "rollcopy-convert",
+ "rollcopy-device",
+ "rollcopy-library",
+ "rollcopy-queue",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml 1.2.1+spec-1.1.0",
+ "ureq",
+ "zbus 5.19.0",
+]
+
+[[package]]
+name = "rollcopy-cli"
+version = "0.1.0"
+dependencies = [
+ "rollcopy-convert",
+ "rollcopy-device",
+ "rollcopy-library",
+ "rollcopy-queue",
+ "tokio",
+]
+
+[[package]]
+name = "rollcopy-convert"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "libheif-rs",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rollcopy-device"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "idevice",
+ "plist",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "rollcopy-library"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "plist",
+ "rollcopy-device",
+ "rusqlite",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
+name = "rollcopy-queue"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rollcopy-convert",
+ "rollcopy-device",
+ "rollcopy-library",
+ "rusqlite",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "ropey"
 version = "2.0.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7204,89 +7287,6 @@ name = "unicode-width"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca718471876992059f251e33aafc334346ada08042b7661dd1fe313a9bced557"
-
-[[package]]
-name = "unspool-app"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "chrono",
- "directories",
- "gpui-kit",
- "gpui-kit-assets",
- "ksni",
- "resvg 0.50.0",
- "semver",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml 1.2.1+spec-1.1.0",
- "unspool-convert",
- "unspool-device",
- "unspool-library",
- "unspool-queue",
- "ureq",
- "zbus 5.19.0",
-]
-
-[[package]]
-name = "unspool-cli"
-version = "0.1.0"
-dependencies = [
- "tokio",
- "unspool-convert",
- "unspool-device",
- "unspool-library",
- "unspool-queue",
-]
-
-[[package]]
-name = "unspool-convert"
-version = "0.1.0"
-dependencies = [
- "image",
- "libheif-rs",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "unspool-device"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "idevice",
- "plist",
- "thiserror 2.0.21",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "unspool-library"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "plist",
- "rusqlite",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "unspool-device",
-]
-
-[[package]]
-name = "unspool-queue"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "rusqlite",
- "tempfile",
- "tokio",
- "unspool-convert",
- "unspool-device",
- "unspool-library",
-]
 
 [[package]]
 name = "untrusted"

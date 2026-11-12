@@ -1,0 +1,16 @@
+[package]
+name = "rollcopy-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+rollcopy-device.workspace = true
+rollcopy-library.workspace = true
+rollcopy-convert.workspace = true
+rollcopy-queue.workspace = true
+
+tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }

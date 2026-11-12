@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Rollcopy
+GenericName=iPhone Photo Copier
+Comment=Copy photos and videos from your iPhone to this computer over USB
+Exec=rollcopy
+Icon=io.github.ankurk91.Rollcopy
+Terminal=false
+Categories=Graphics;Photography;
+Keywords=iPhone;iPad;photos;videos;HEIC;import;copy;
+StartupNotify=true
+StartupWMClass=io.github.ankurk91.Rollcopy
