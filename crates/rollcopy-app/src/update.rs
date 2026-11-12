@@ -5,7 +5,8 @@ use std::time::Duration;
 
 pub const REPO_URL: &str = "https://github.com/ankurk91/rollcopy-desktop-app";
 pub const ISSUES_URL: &str = "https://github.com/ankurk91/rollcopy-desktop-app/issues/new";
-const LATEST_URL: &str = "https://api.github.com/repos/ankurk91/rollcopy-desktop-app/releases/latest";
+const LATEST_URL: &str =
+    "https://api.github.com/repos/ankurk91/rollcopy-desktop-app/releases/latest";
 const TIMEOUT: Duration = Duration::from_secs(10);
 /// Lines of release notes shown in the dialog.
 const NOTE_LINES: usize = 20;
