@@ -23,3 +23,7 @@
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Personal drafts (blog posts etc.) never go in the repo.
+docs/blog-*.md
+*.draft.md
