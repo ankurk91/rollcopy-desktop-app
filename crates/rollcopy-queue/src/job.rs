@@ -279,13 +279,13 @@ async fn run_inner(
     let overwrite = spec.overwrite;
     tokio::task::spawn_blocking(move || {
         let existed = overwrite && dest.exists();
-        let persisted = if overwrite {
-            part_guard.persist(&dest)
-        } else {
-            // Atomic "rename unless something is there" (renameat2 NOREPLACE,
-            // or link + unlink), so a file that appeared meanwhile is kept.
-            part_guard.persist_noclobber(&dest)
-        };
+        let persisted = persist_into(
+            part_guard,
+            &dest,
+            overwrite,
+            |p, d| p.persist_noclobber(d),
+            |p, d| p.persist(d),
+        );
         match persisted {
             Ok(()) => {
                 sync_parent(&dest);
@@ -300,6 +300,76 @@ async fn run_inner(
     })
     .await
     .map_err(|e| failed(Stage::Write, e))?
+}
+
+/// Moves the finished temporary file to `dest`.
+///
+/// Without `overwrite` this is atomic "rename unless something is there"
+/// (renameat2 NOREPLACE, or link + unlink), so a file that appeared
+/// meanwhile is kept. Some filesystems support neither: GVFS FUSE shares
+/// opened in Files (`/run/user/…/gvfs/smb-share:…`), sshfs without hard
+/// links, some exFAT/NAS FUSE drivers. There every copy used to fail, so
+/// if nothing is at `dest` it falls back to a plain rename (audit NEW-01).
+/// That isn't atomic, but the queue's reservation already keeps two
+/// Rollcopy jobs off the same file. An existing file is never replaced.
+///
+/// The two steps are passed in so tests can stand in for a filesystem.
+fn persist_into(
+    part: TempPath,
+    dest: &Path,
+    overwrite: bool,
+    noclobber: impl FnOnce(TempPath, &Path) -> Result<(), tempfile::PathPersistError>,
+    replace: impl FnOnce(TempPath, &Path) -> Result<(), tempfile::PathPersistError>,
+) -> Result<(), tempfile::PathPersistError> {
+    if overwrite {
+        return replace(part, dest);
+    }
+    match noclobber(part, dest) {
+        Err(e) if no_atomic_rename(&e.error) => {
+            match std::fs::symlink_metadata(dest) {
+                Err(m) if m.kind() == std::io::ErrorKind::NotFound => {
+                    note_fallback(dest);
+                    replace(e.path, dest)
+                }
+                // Something is there (or can't be checked): leave it.
+                Ok(_) => Err(tempfile::PathPersistError {
+                    error: std::io::Error::from(std::io::ErrorKind::AlreadyExists),
+                    path: e.path,
+                }),
+                Err(_) => Err(e),
+            }
+        }
+        other => other,
+    }
+}
+
+/// The filesystem can't do "rename unless something is there".
+fn no_atomic_rename(e: &std::io::Error) -> bool {
+    // Linux errno values: EPERM, EXDEV, ENOSYS, EOPNOTSUPP.
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::Unsupported | std::io::ErrorKind::PermissionDenied
+    ) || matches!(e.raw_os_error(), Some(1 | 18 | 38 | 95))
+}
+
+/// Logs the plain-rename fallback once per destination folder.
+fn note_fallback(dest: &Path) {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    static NOTED: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
+    let Some(dir) = dest.parent() else {
+        return;
+    };
+    let mut noted = NOTED.lock().unwrap_or_else(|e| e.into_inner());
+    if noted
+        .get_or_insert_with(HashSet::new)
+        .insert(dir.to_path_buf())
+    {
+        eprintln!(
+            "rollcopy: this filesystem can't rename without replacing; \
+             using a plain rename for new files"
+        );
+    }
 }
 
 /// Makes a rename in `path`'s folder survive a power cut (audit REL-09).
@@ -325,6 +395,54 @@ async fn blocking<T: Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unsupported(part: TempPath) -> Result<(), tempfile::PathPersistError> {
+        Err(tempfile::PathPersistError {
+            error: std::io::Error::from(std::io::ErrorKind::Unsupported),
+            path: part,
+        })
+    }
+
+    /// A filesystem without RENAME_NOREPLACE or hard links (GVFS, sshfs).
+    #[test]
+    fn falls_back_to_a_plain_rename_when_nothing_is_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("IMG_0001.JPG");
+        let part = dir.path().join(".rollcopy-1-1-IMG_0001.JPG.part");
+        std::fs::write(&part, b"new").unwrap();
+        persist_into(
+            TempPath::try_from_path(&part).unwrap(),
+            &dest,
+            false,
+            |p, _| unsupported(p),
+            |p, d| p.persist(d),
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new");
+        assert!(!part.exists());
+    }
+
+    #[test]
+    fn fallback_never_touches_an_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("IMG_0001.JPG");
+        let part = dir.path().join(".rollcopy-1-1-IMG_0001.JPG.part");
+        std::fs::write(&dest, b"old").unwrap();
+        std::fs::write(&part, b"new").unwrap();
+        let err = persist_into(
+            TempPath::try_from_path(&part).unwrap(),
+            &dest,
+            false,
+            |p, _| unsupported(p),
+            |p, d| p.persist(d),
+        )
+        .unwrap_err();
+        assert_eq!(err.error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old");
+        drop(err);
+        // The temporary file is cleaned up with the error's TempPath.
+        assert!(!part.exists());
+    }
 
     #[test]
     fn work_kinds() {
