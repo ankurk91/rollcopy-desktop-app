@@ -65,6 +65,8 @@ pub(crate) struct JobSpec {
     pub staging_dir: PathBuf,
     /// Backstop for the first stat (see `queue::within`).
     pub device_timeout: std::time::Duration,
+    /// Set when the job is cancelled; stops conversion work.
+    pub cancel: rollcopy_convert::Cancel,
 }
 
 /// `<pid>-<n>`, unique across jobs, queues and Rollcopy processes.
@@ -231,7 +233,8 @@ async fn run_inner(
                 part.to_path_buf(),
                 spec.settings.jpeg_quality,
             );
-            blocking(move || rollcopy_convert::heic_to_jpeg(&src, &dst, q))
+            let cancel = spec.cancel.clone();
+            blocking(move || rollcopy_convert::heic_to_jpeg_with(&src, &dst, q, &cancel))
                 .await
                 .map_err(|e| failed(Stage::Convert, e))?;
             state(JobState::Verifying);
@@ -247,9 +250,10 @@ async fn run_inner(
                 part.to_path_buf(),
                 spec.settings.video_mode,
             );
+            let cancel = spec.cancel.clone();
             let source_info = blocking(move || {
                 let info = rollcopy_convert::probe(&src)?;
-                rollcopy_convert::to_mp4(&src, &dst, mode)?;
+                rollcopy_convert::to_mp4_with(&src, &dst, mode, &cancel)?;
                 Ok(info)
             })
             .await

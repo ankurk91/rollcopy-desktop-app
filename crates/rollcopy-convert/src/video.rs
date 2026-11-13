@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use crate::ConvertError;
+use crate::{Cancel, ConvertError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VideoMode {
@@ -65,6 +65,17 @@ fn convert_limit(mode: VideoMode, secs: f64) -> Duration {
 
 /// Runs a tool, killing it if it takes longer than `limit`. Returns stdout.
 fn run(cmd: &mut Command, what: &str, limit: Duration) -> Result<String, ConvertError> {
+    run_with(cmd, what, limit, &Cancel::new())
+}
+
+/// [`run`] that also kills the tool as soon as `cancel` is set.
+fn run_with(
+    cmd: &mut Command,
+    what: &str,
+    limit: Duration,
+    cancel: &Cancel,
+) -> Result<String, ConvertError> {
+    cancel.check()?;
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -101,19 +112,24 @@ fn run(cmd: &mut Command, what: &str, limit: Duration) -> Result<String, Convert
     );
 
     let deadline = Instant::now() + limit;
+    let mut cancelled = false;
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break Some(status);
         }
-        if Instant::now() >= deadline {
+        cancelled = cancel.is_cancelled();
+        if cancelled || Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
             break None;
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(20));
     };
     let out = stdout.join().unwrap_or_default();
     let err = stderr.join().unwrap_or_default();
+    if cancelled {
+        return Err(ConvertError::Cancelled);
+    }
     let Some(status) = status else {
         return Err(ConvertError::Tool {
             tool: what.to_owned(),
@@ -187,18 +203,40 @@ fn parse_probe(out: &str) -> Result<VideoInfo, ConvertError> {
 /// Converts `src` (MOV, or any ffmpeg-readable video) to an MP4 at `dst`
 /// (overwritten). Keeps the creation date and other container metadata.
 pub fn to_mp4(src: &Path, dst: &Path, mode: VideoMode) -> Result<(), ConvertError> {
+    to_mp4_with(src, dst, mode, &Cancel::new())
+}
+
+/// [`to_mp4`] that kills ffmpeg as soon as `cancel` is set and removes
+/// whatever it wrote (audit NEW-03).
+pub fn to_mp4_with(
+    src: &Path,
+    dst: &Path,
+    mode: VideoMode,
+    cancel: &Cancel,
+) -> Result<(), ConvertError> {
+    let result = convert(src, dst, mode, cancel);
+    if cancel.is_cancelled() {
+        let _ = std::fs::remove_file(dst);
+        return Err(ConvertError::Cancelled);
+    }
+    result
+}
+
+fn convert(src: &Path, dst: &Path, mode: VideoMode, cancel: &Cancel) -> Result<(), ConvertError> {
     let info = probe(src)?;
     if mode == VideoMode::H264
         && let Some(device) = gpu_device()
     {
         // A clip the GPU path can't take is done in software below.
-        if run_h264(src, dst, &info, Encoder::Gpu(device)).is_ok() {
-            return Ok(());
+        match run_h264(src, dst, &info, Encoder::Gpu(device), cancel) {
+            Ok(()) => return Ok(()),
+            Err(ConvertError::Cancelled) => return Err(ConvertError::Cancelled),
+            Err(_) => {}
         }
     }
     match mode {
-        VideoMode::Remux => run_remux(src, dst, &info),
-        VideoMode::H264 => run_h264(src, dst, &info, Encoder::Cpu),
+        VideoMode::Remux => run_remux(src, dst, &info, cancel),
+        VideoMode::H264 => run_h264(src, dst, &info, Encoder::Cpu, cancel),
     }
 }
 
@@ -214,7 +252,12 @@ fn finish(cmd: &mut Command, dst: &Path) {
         .arg(dst);
 }
 
-fn run_remux(src: &Path, dst: &Path, info: &VideoInfo) -> Result<(), ConvertError> {
+fn run_remux(
+    src: &Path,
+    dst: &Path,
+    info: &VideoInfo,
+    cancel: &Cancel,
+) -> Result<(), ConvertError> {
     let mut cmd = ffmpeg();
     cmd.arg("-i")
         .arg(src)
@@ -227,10 +270,11 @@ fn run_remux(src: &Path, dst: &Path, info: &VideoInfo) -> Result<(), ConvertErro
         _ => &mut cmd,
     };
     finish(&mut cmd, dst);
-    run(
+    run_with(
         &mut cmd,
         "ffmpeg",
         convert_limit(VideoMode::Remux, info.duration_secs),
+        cancel,
     )?;
     Ok(())
 }
@@ -246,7 +290,13 @@ enum Encoder {
     Gpu(PathBuf),
 }
 
-fn run_h264(src: &Path, dst: &Path, info: &VideoInfo, enc: Encoder) -> Result<(), ConvertError> {
+fn run_h264(
+    src: &Path,
+    dst: &Path,
+    info: &VideoInfo,
+    enc: Encoder,
+    cancel: &Cancel,
+) -> Result<(), ConvertError> {
     let mut cmd = ffmpeg();
     if let Encoder::Gpu(device) = &enc {
         cmd.args(["-init_hw_device", "vulkan=vk", "-init_hw_device"])
@@ -277,10 +327,11 @@ fn run_h264(src: &Path, dst: &Path, info: &VideoInfo, enc: Encoder) -> Result<()
     };
     cmd.args(["-c:a", "aac", "-b:a", "192k"]);
     finish(&mut cmd, dst);
-    run(
+    run_with(
         &mut cmd,
         "ffmpeg",
         convert_limit(VideoMode::H264, info.duration_secs),
+        cancel,
     )?;
     Ok(())
 }
@@ -370,6 +421,50 @@ mod tests {
     }
 
     #[cfg(unix)]
+    /// Audit NEW-03: cancelling kills a running tool at once.
+    #[cfg(unix)]
+    #[test]
+    fn cancel_kills_the_tool() {
+        let cancel = Cancel::new();
+        let c = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            c.cancel();
+        });
+        let start = Instant::now();
+        let err = run_with(
+            Command::new("sleep").arg("30"),
+            "sleep",
+            Duration::from_secs(60),
+            &cancel,
+        )
+        .unwrap_err();
+        let took = start.elapsed();
+        assert!(matches!(err, ConvertError::Cancelled), "{err}");
+        assert!(took < Duration::from_millis(300), "{took:?}");
+    }
+
+    /// A cancelled conversion leaves no output behind.
+    #[cfg(unix)]
+    #[test]
+    fn cancelled_conversion_leaves_no_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(src) = hlg_clip(dir.path()) else {
+            eprintln!("ffmpeg with libx265 not available; skipping");
+            return;
+        };
+        let dst = dir.path().join(".rollcopy-1-1-IMG_0001.MP4.part");
+        let cancel = Cancel::new();
+        let c = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            c.cancel();
+        });
+        let err = to_mp4_with(&src, &dst, VideoMode::H264, &cancel).unwrap_err();
+        assert!(matches!(err, ConvertError::Cancelled), "{err}");
+        assert!(!dst.exists());
+    }
+
     #[test]
     fn output_and_failures_come_back() {
         let out = run(
@@ -432,7 +527,7 @@ mod tests {
         let info = probe(&src).unwrap();
         assert!(info.hdr);
         let dst = dir.path().join(".rollcopy-1-1-IMG_0001.MP4.part");
-        run_h264(&src, &dst, &info, enc.clone()).unwrap();
+        run_h264(&src, &dst, &info, enc.clone(), &Cancel::new()).unwrap();
         let out = verify_mp4(&dst, info.duration_secs).unwrap();
         assert_eq!(out.codec, "h264", "{enc:?}");
         assert!(!out.hdr, "{enc:?} left HDR in");

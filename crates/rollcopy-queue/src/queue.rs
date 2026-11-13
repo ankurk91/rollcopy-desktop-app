@@ -286,7 +286,9 @@ struct Manager<O: Opener> {
     jobs: HashMap<JobId, Job>,
     pending: VecDeque<JobId>,
     /// Running jobs and the handles that cancel them.
-    running: HashMap<JobId, AbortHandle>,
+    /// The task's handle, and the flag that stops its conversion work
+    /// (which runs on a blocking thread and can't be aborted).
+    running: HashMap<JobId, (AbortHandle, rollcopy_convert::Cancel)>,
     conflicts: VecDeque<JobId>,
     shown_conflict: Option<JobId>,
     /// "Do this for all": answer for further conflicts until the queue idles.
@@ -403,8 +405,10 @@ impl<O: Opener> Manager<O> {
         if job.state.is_finished() {
             return;
         }
-        // Dropping the task removes its temporary files.
-        if let Some(handle) = self.running.remove(&id) {
+        // Stop ffmpeg / the HEIC encoder first, then drop the task, which
+        // removes its temporary files (audit NEW-03).
+        if let Some((handle, cancel)) = self.running.remove(&id) {
+            cancel.cancel();
             handle.abort();
         }
         self.pending.retain(|p| *p != id);
@@ -659,7 +663,9 @@ impl<O: Opener> Manager<O> {
                 break;
             }
 
+            let cancel = rollcopy_convert::Cancel::new();
             let spec = JobSpec {
+                cancel: cancel.clone(),
                 id,
                 asset: job.asset.clone(),
                 dest: job.dest.clone(),
@@ -704,7 +710,7 @@ impl<O: Opener> Manager<O> {
                 let conn = result.is_ok().then_some((udid, fs));
                 let _ = done_tx.send(Done { id, result, conn });
             });
-            self.running.insert(id, task.abort_handle());
+            self.running.insert(id, (task.abort_handle(), cancel));
         }
     }
 

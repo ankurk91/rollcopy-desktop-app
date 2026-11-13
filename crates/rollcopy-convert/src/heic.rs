@@ -120,7 +120,21 @@ pub(crate) fn write_jpeg(
 /// Converts the primary image of a HEIC/HEIF file to a JPEG at `dst`
 /// (overwritten). Blocking and CPU-heavy: run it on a worker thread.
 pub fn heic_to_jpeg(src: &Path, dst: &Path, quality: u8) -> Result<JpegInfo, ConvertError> {
+    heic_to_jpeg_with(src, dst, quality, &crate::Cancel::new())
+}
+
+/// [`heic_to_jpeg`] that stops when `cancel` is set: nothing is written
+/// after it, and an output written meanwhile is removed, so a cancelled job
+/// can't leave a `.part` file behind (audit NEW-03).
+pub fn heic_to_jpeg_with(
+    src: &Path,
+    dst: &Path,
+    quality: u8,
+    cancel: &crate::Cancel,
+) -> Result<JpegInfo, ConvertError> {
+    cancel.check()?;
     let d = decode_heic(src)?;
+    cancel.check()?;
     let info = JpegInfo {
         width: d.width,
         height: d.height,
@@ -128,6 +142,10 @@ pub fn heic_to_jpeg(src: &Path, dst: &Path, quality: u8) -> Result<JpegInfo, Con
         has_icc: d.icc.is_some(),
     };
     write_jpeg(dst, &d.rgb, (d.width, d.height), quality, d.icc, d.exif)?;
+    if cancel.is_cancelled() {
+        let _ = std::fs::remove_file(dst);
+        return Err(ConvertError::Cancelled);
+    }
     Ok(info)
 }
 

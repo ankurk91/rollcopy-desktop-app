@@ -442,6 +442,91 @@ async fn hung_device_calls_pause_and_recover() {
     );
 }
 
+/// Audit NEW-03: cancelling a job mid-conversion stops ffmpeg and leaves
+/// no temporary file.
+#[tokio::test]
+async fn cancel_stops_a_running_conversion() {
+    // A 60 s generated MOV: long enough that H.264 is still encoding.
+    let src_dir = tempfile::tempdir().unwrap();
+    let mov = src_dir.path().join("in.mov");
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i"])
+        .arg("testsrc2=duration=60:size=1280x720:rate=30")
+        .args([
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+        ])
+        .arg(&mov)
+        .status()
+        .is_ok_and(|s| s.success());
+    if !made {
+        eprintln!("ffmpeg not available; skipping");
+        return;
+    }
+    let dest = tempfile::tempdir().unwrap();
+    let mut s = Settings::new(dest.path().to_path_buf());
+    s.layout = Layout::Flat;
+    s.video_mode = rollcopy_convert::VideoMode::H264;
+    let phone = FakePhone::with(&[("/DCIM/100APPLE/IMG_0001.MOV", &std::fs::read(&mov).unwrap())]);
+    let mut h = Harness::start(phone, s);
+    let mut video = Asset::new("DCIM/100APPLE", "IMG_0001.MOV", MediaKind::Video);
+    video.captured = Some(Utc.timestamp_opt(1_700_000_000, 0).unwrap());
+    h.add(vec![video]);
+
+    let id = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            if let QueueEvent::State {
+                id,
+                state: JobState::Converting,
+            } = h.events.recv().await.unwrap()
+            {
+                return id;
+            }
+        }
+    })
+    .await
+    .expect("the job never started converting");
+    // Wait until ffmpeg is encoding into the destination (after the
+    // one-time GPU trial, which can take a few seconds).
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while ffmpeg_writing_to(dest.path()) == 0 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("ffmpeg never started encoding");
+
+    h.queue.send(QueueCommand::Cancel(id));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(ffmpeg_writing_to(dest.path()), 0, "ffmpeg still running");
+    assert_eq!(walk(dest.path()), Vec::<PathBuf>::new());
+}
+
+/// ffmpeg processes whose command line mentions `dir`.
+fn ffmpeg_writing_to(dir: &Path) -> usize {
+    let needle = dir.to_string_lossy().into_owned();
+    std::fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            std::fs::read(e.path().join("cmdline")).is_ok_and(|c| {
+                // Arguments are NUL-separated; the first is the program.
+                let args: Vec<String> = c
+                    .split(|b| *b == 0)
+                    .map(|a| String::from_utf8_lossy(a).into_owned())
+                    .collect();
+                args.first().is_some_and(|p| p.ends_with("ffmpeg"))
+                    && args.iter().any(|a| a.contains(&needle))
+            })
+        })
+        .count()
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for e in std::fs::read_dir(dir).unwrap().flatten() {
