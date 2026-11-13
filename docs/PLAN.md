@@ -36,7 +36,7 @@ Status: **v0.1.0 released (2026-11-12). M0–M7 done**: Check for updates finds 
 Decided 2026-11-12. In v1, Rollcopy is **read-only towards the iPhone**:
 
 - AFC is only used to list, stat and read. The device wrapper doesn't expose write, rename, remove or mkdir at all, so the rest of the app can't call them by mistake.
-- `Photos.sqlite` and its `-wal`/`-shm` files are copied to the laptop first and opened from there, read-only. The phone's copy is never opened in place.
+- `Photos.sqlite` and its `-wal` are copied to the laptop first and opened from there. The phone's copy is never opened in place. `-shm` isn't copied. Both files are stat'ed before and after the copy, and fetched again (up to 3 times) if iOS changed them meanwhile. The local copy is then checkpointed and checked with `PRAGMA quick_check` (audit REL-07), read, and deleted (SEC-02).
 - No services beyond lockdown (device info), AFC (read), battery/disk-usage queries and pairing. Pairing only adds a trust record, which is the same thing tapping Trust does with Finder or iTunes.
 - Deleting from the phone stays out of scope until v2 (§11), and then needs its own design and explicit confirmation.
 - On the laptop side, a copy never destroys an existing file unless it's replaced at the final rename (§7.4).
@@ -64,7 +64,7 @@ You asked what the "p2p" connection can do. It's actually two protocols. Both we
 
 ### Per-item information from the Photos database
 
-`PhotoData/Photos.sqlite` is copied read-only along with its `-wal` and `-shm` files. Fields proven on 2026-10-19 are marked ✔. The rest need checking in M1.
+`PhotoData/Photos.sqlite` is copied read-only along with its `-wal` file (see §2a). Fields proven on 2026-10-19 are marked ✔. The rest need checking in M1.
 
 - ✔ Folder + file name: `ZASSET.ZDIRECTORY`, `ZFILENAME`
 - ✔ In Recently Deleted: `ZTRASHEDSTATE = 1`. **Hidden by default.**

@@ -7,7 +7,13 @@ use rollcopy_device::{DeviceError, EntryKind, MediaFs, Session};
 use crate::asset::{Asset, MediaKind, kind_from_extension};
 use crate::photos_db;
 
-const DB_FILES: [&str; 3] = ["Photos.sqlite", "Photos.sqlite-wal", "Photos.sqlite-shm"];
+/// Files fetched from `/PhotoData`. The `-shm` index is never copied: it
+/// only describes the phone's live WAL and could mislead SQLite here.
+const DB_FILES: [&str; 2] = ["Photos.sqlite", "Photos.sqlite-wal"];
+/// Local files removed before a fetch and after reading.
+const LOCAL_FILES: [&str; 3] = ["Photos.sqlite", "Photos.sqlite-wal", "Photos.sqlite-shm"];
+/// Fetches tried when the database changes on the phone while it's copied.
+const SNAPSHOT_TRIES: usize = 3;
 
 /// Where the item list came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,30 +31,91 @@ pub struct Library {
     pub source: Source,
 }
 
-/// Copies `Photos.sqlite` and its `-wal`/`-shm` files from the phone into
-/// `dest_dir` (PLAN §2a: never opened in place). Each file goes to a `.part`
-/// file first and is renamed when complete. A local `-wal`/`-shm` left over
-/// from an earlier copy is removed when the phone has none, so SQLite never
-/// replays a stale WAL against a newer database.
+/// Copies `Photos.sqlite` and its `-wal` from the phone into `dest_dir`
+/// (PLAN §2a: never opened in place). Each file goes to a `.part` file
+/// first and is renamed when complete.
+///
+/// iOS keeps writing while the two files are copied one after the other, so
+/// both are stat'ed before and after; if either changed, the copy is taken
+/// again, up to [`SNAPSHOT_TRIES`] times (audit REL-07). Local leftovers
+/// (an old `-wal`, any `-shm`) are removed first, so SQLite never pairs a
+/// stale WAL with a newer database.
 pub async fn fetch_photos_db(fs: &mut MediaFs, dest_dir: &Path) -> Result<PathBuf, DeviceError> {
     tokio::fs::create_dir_all(dest_dir).await?;
-    for name in DB_FILES {
-        let src = format!("/PhotoData/{name}");
-        let dest = dest_dir.join(name);
-        if !fs.exists(&src).await? {
-            if name == DB_FILES[0] {
-                return Err(DeviceError::NotFound(src));
-            }
-            match tokio::fs::remove_file(&dest).await {
+    for attempt in 1..=SNAPSHOT_TRIES {
+        for name in LOCAL_FILES {
+            match tokio::fs::remove_file(dest_dir.join(name)).await {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-                _ => continue,
+                _ => {}
             }
         }
-        let part = dest_dir.join(format!("{name}.part"));
-        fs.copy_to_local(&src, &part, |_| {}).await?;
-        tokio::fs::rename(&part, &dest).await?;
+        let before = remote_state(fs).await?;
+        if before[0].is_none() {
+            return Err(DeviceError::NotFound(format!("/PhotoData/{}", DB_FILES[0])));
+        }
+        for (name, state) in DB_FILES.iter().zip(&before) {
+            if state.is_none() {
+                continue;
+            }
+            let part = dest_dir.join(format!("{name}.part"));
+            fs.copy_to_local(&format!("/PhotoData/{name}"), &part, |_| {})
+                .await?;
+            tokio::fs::rename(&part, dest_dir.join(name)).await?;
+        }
+        if remote_state(fs).await? == before || attempt == SNAPSHOT_TRIES {
+            // After the last try, use what we have: `prepare` checks it.
+            break;
+        }
     }
     Ok(dest_dir.join(DB_FILES[0]))
+}
+
+/// Size and modified time of each of [`DB_FILES`] on the phone.
+async fn remote_state(
+    fs: &mut MediaFs,
+) -> Result<[Option<(u64, std::time::SystemTime)>; 2], DeviceError> {
+    let mut out = [None, None];
+    for (slot, name) in out.iter_mut().zip(DB_FILES) {
+        match fs.stat(&format!("/PhotoData/{name}")).await {
+            Ok(st) => *slot = Some((st.size, st.modified)),
+            Err(DeviceError::NotFound(_)) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(out)
+}
+
+/// Fetches the database and reads it, fetching once more if the copy
+/// turns out damaged. The copy is deleted afterwards either way.
+async fn read_from_db(
+    fs: &mut MediaFs,
+    dir: &Path,
+) -> Result<Result<Vec<Asset>, String>, DeviceError> {
+    let mut last = String::new();
+    for _ in 0..2 {
+        let path = match fetch_photos_db(fs, dir).await {
+            Ok(p) => p,
+            Err(e) => {
+                remove_photos_db(dir);
+                if e.is_connection_problem() {
+                    return Err(e);
+                }
+                return Ok(Err(e.to_string()));
+            }
+        };
+        let read = tokio::task::spawn_blocking(move || {
+            photos_db::prepare(&path)?;
+            photos_db::read_assets(&path)
+        })
+        .await
+        .map_err(|e| DeviceError::Other(e.to_string()))?;
+        remove_photos_db(dir);
+        match read {
+            Ok(assets) => return Ok(Ok(assets)),
+            Err(e) => last = e.to_string(),
+        }
+    }
+    Ok(Err(last))
 }
 
 /// Finds edited versions: `PhotoData/Mutations/<dir>/<stem>/Adjustments/
@@ -150,7 +217,7 @@ pub async fn scan_dcim(fs: &mut MediaFs) -> Result<Vec<Asset>, DeviceError> {
 /// history (places, people, captions), so it isn't kept once read
 /// (audit SEC-02).
 pub fn remove_photos_db(dir: &Path) {
-    for name in DB_FILES {
+    for name in LOCAL_FILES {
         let _ = std::fs::remove_file(dir.join(name));
         let _ = std::fs::remove_file(dir.join(format!("{name}.part")));
     }
@@ -166,27 +233,7 @@ pub fn remove_photos_db(dir: &Path) {
 pub async fn load(session: &Session, cache_dir: &Path) -> Result<Library, DeviceError> {
     let mut fs = session.media().await?;
 
-    let fetched = fetch_photos_db(&mut fs, cache_dir).await;
-    let from_db = match fetched {
-        Ok(path) => {
-            let dir = cache_dir.to_path_buf();
-            tokio::task::spawn_blocking(move || {
-                let assets = photos_db::read_assets(&path);
-                remove_photos_db(&dir);
-                assets
-            })
-            .await
-            .map_err(|e| DeviceError::Other(e.to_string()))?
-            .map_err(|e| e.to_string())
-        }
-        Err(e) => {
-            remove_photos_db(cache_dir);
-            if e.is_connection_problem() {
-                return Err(e);
-            }
-            Err(e.to_string())
-        }
-    };
+    let from_db = read_from_db(&mut fs, cache_dir).await?;
 
     let (mut assets, source) = match from_db {
         Ok(a) if !a.is_empty() => (a, Source::PhotosDb),

@@ -33,6 +33,25 @@ fn columns(conn: &Connection, table: &str) -> rusqlite::Result<HashSet<String>> 
     names.collect()
 }
 
+/// Makes a fetched copy self-contained and checks it (audit REL-07): folds
+/// the WAL into the main file, then runs `PRAGMA quick_check`. Works on the
+/// local copy only, which is why it may open it read-write; the phone's
+/// database is never opened.
+pub fn prepare(db_path: &Path) -> Result<(), DbError> {
+    let conn = Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+    let check: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
+    if check != "ok" {
+        return Err(DbError::Schema(format!(
+            "database copy is damaged: {check}"
+        )));
+    }
+    Ok(())
+}
+
 /// Opens the database copy read-only and returns every asset row, trashed
 /// ones included (callers decide what to show).
 pub fn read_assets(db_path: &Path) -> Result<Vec<Asset>, DbError> {
@@ -482,5 +501,54 @@ mod tests {
             read_assets(&d.path().join("Photos.sqlite")),
             Err(DbError::Schema(_))
         ));
+    }
+
+    /// A copy taken while iOS was writing: the newest rows are only in the
+    /// WAL, and there is no `-shm` (it isn't copied).
+    #[test]
+    fn wal_rows_are_read_without_shm() {
+        let live = tempfile::tempdir().unwrap();
+        let path = live.path().join("Photos.sqlite");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;
+             CREATE TABLE ZASSET (Z_PK INTEGER PRIMARY KEY, ZDIRECTORY TEXT, ZFILENAME TEXT);
+             INSERT INTO ZASSET VALUES (1, 'DCIM/100APPLE', 'IMG_0001.HEIC');",
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .unwrap();
+        conn.execute(
+            "INSERT INTO ZASSET VALUES (2, 'DCIM/100APPLE', 'IMG_0002.HEIC')",
+            [],
+        )
+        .unwrap();
+
+        // Copy as fetched: main file and WAL, while the writer is still open.
+        let copy = tempfile::tempdir().unwrap();
+        let dst = copy.path().join("Photos.sqlite");
+        std::fs::copy(&path, &dst).unwrap();
+        std::fs::copy(
+            live.path().join("Photos.sqlite-wal"),
+            copy.path().join("Photos.sqlite-wal"),
+        )
+        .unwrap();
+        drop(conn);
+
+        prepare(&dst).unwrap();
+        let names: Vec<String> = read_assets(&dst)
+            .unwrap()
+            .into_iter()
+            .map(|a| a.filename)
+            .collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+    }
+
+    #[test]
+    fn damaged_copy_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Photos.sqlite");
+        std::fs::write(&path, b"SQLite format 3\0 but then garbage").unwrap();
+        assert!(prepare(&path).is_err());
     }
 }

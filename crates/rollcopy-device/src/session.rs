@@ -83,6 +83,19 @@ impl std::fmt::Debug for Session {
     }
 }
 
+/// Only "usbmuxd has no (usable) record" means not paired. Anything else,
+/// such as a socket hiccup, must not lead to a new pairing, which would
+/// replace the record and ask for Trust again (audit REL-08).
+fn pair_record_error(e: idevice::IdeviceError) -> DeviceError {
+    match e {
+        // No `PairRecordData` in usbmuxd's answer, or a record that doesn't parse.
+        idevice::IdeviceError::UnexpectedResponse(_) | idevice::IdeviceError::Plist(_) => {
+            DeviceError::NotPaired
+        }
+        other => other.into(),
+    }
+}
+
 impl Session {
     /// Connects to the phone with this UDID and starts a lockdown session.
     pub async fn open(udid: &str) -> Result<Self> {
@@ -94,11 +107,7 @@ impl Session {
             Err(idevice::IdeviceError::DeviceNotFound) => return Err(DeviceError::NotConnected),
             Err(e) => return Err(e.into()),
         };
-        // usbmuxd answers with an error when it has no record for this phone.
-        let pairing = mux
-            .get_pair_record(udid)
-            .await
-            .map_err(|_| DeviceError::NotPaired)?;
+        let pairing = mux.get_pair_record(udid).await.map_err(pair_record_error)?;
 
         let provider = device.to_provider(UsbmuxdAddr::default(), LABEL);
         let mut lockdown = LockdownClient::connect(&provider).await?;
@@ -225,4 +234,20 @@ pub async fn pair(udid: &str) -> Result<()> {
         .map_err(usbmuxd_unavailable)?;
     mux.save_pair_record(udid, bytes).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod pair_record_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_missing_record_means_not_paired() {
+        let missing = idevice::IdeviceError::UnexpectedResponse("missing PairRecordData".into());
+        assert!(matches!(pair_record_error(missing), DeviceError::NotPaired));
+        let hiccup = idevice::IdeviceError::Socket(std::io::Error::other("reset"));
+        assert!(matches!(
+            pair_record_error(hiccup),
+            DeviceError::Disconnected(_)
+        ));
+    }
 }
