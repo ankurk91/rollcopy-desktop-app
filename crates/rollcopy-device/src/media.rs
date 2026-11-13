@@ -25,6 +25,21 @@ async fn deadline<T>(
     }
 }
 
+/// [`deadline`], then a not-found answer names `path`.
+async fn deadline_at<T>(
+    what: &str,
+    path: &str,
+    fut: impl Future<Output = std::result::Result<T, idevice::IdeviceError>>,
+) -> Result<T> {
+    match tokio::time::timeout(IO_TIMEOUT, fut).await {
+        Ok(r) => r.map_err(not_found_as(path)),
+        Err(_) => Err(DeviceError::Disconnected(format!(
+            "{what} timed out after {} s",
+            IO_TIMEOUT.as_secs()
+        ))),
+    }
+}
+
 /// Bytes requested per AFC read. idevice splits larger requests into its own
 /// maximum transfer size; 1 MiB keeps round trips low without much memory.
 const READ_CHUNK: usize = 1 << 20;
@@ -105,18 +120,14 @@ impl MediaFs {
 
     /// Entry names in a directory, without `.` and `..`, sorted.
     pub async fn list_dir(&mut self, path: &str) -> Result<Vec<String>> {
-        let mut names = self.afc.list_dir(path).await.map_err(not_found_as(path))?;
+        let mut names = deadline_at("list", path, self.afc.list_dir(path)).await?;
         names.retain(|n| n != "." && n != "..");
         names.sort();
         Ok(names)
     }
 
     pub async fn stat(&mut self, path: &str) -> Result<Stat> {
-        let fi = self
-            .afc
-            .get_file_info(path)
-            .await
-            .map_err(not_found_as(path))?;
+        let fi = deadline_at("stat", path, self.afc.get_file_info(path)).await?;
         let kind = match fi.st_ifmt.as_str() {
             "S_IFREG" => EntryKind::File,
             "S_IFDIR" => EntryKind::Dir,
@@ -146,13 +157,9 @@ impl MediaFs {
     /// Reads a whole file into memory. For small files only (thumbnails,
     /// metadata); use [`MediaFs::copy_to_local`] for media.
     pub async fn read(&mut self, path: &str) -> Result<Vec<u8>> {
-        let mut f = self
-            .afc
-            .open(path, AfcFopenMode::RdOnly)
-            .await
-            .map_err(not_found_as(path))?;
-        let data = f.read_entire().await?;
-        f.close().await?;
+        let mut f = deadline_at("open", path, self.afc.open(path, AfcFopenMode::RdOnly)).await?;
+        let data = deadline("read", f.read_entire()).await?;
+        deadline("close", f.close()).await?;
         Ok(data)
     }
 

@@ -27,6 +27,25 @@ const AUTO_RETRIES: u32 = 1;
 /// often (audit REL-04).
 const PROBE_EVERY: Duration = Duration::from_secs(2);
 
+/// Runs a device call the queue waits on (opening a phone, a job's first
+/// stat) with a backstop deadline; a timeout counts as the phone being
+/// gone. The device layer has its own, shorter deadlines; this keeps a
+/// stuck [`Opener`] or [`MediaRead`] from holding a worker or the
+/// reconnect probe forever (audit NEW-02).
+pub(crate) async fn within<T>(
+    limit: Duration,
+    what: &str,
+    fut: impl Future<Output = Result<T, DeviceError>>,
+) -> Result<T, DeviceError> {
+    match tokio::time::timeout(limit, fut).await {
+        Ok(r) => r,
+        Err(_) => Err(DeviceError::Disconnected(format!(
+            "{what} timed out after {} s",
+            limit.as_secs_f32()
+        ))),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
     Read,
@@ -174,6 +193,11 @@ impl QueueHandle {
 pub trait Opener: Send + Sync + 'static {
     type Media: MediaRead + 'static;
     fn open(&self, udid: &str) -> impl Future<Output = Result<Self::Media, DeviceError>> + Send;
+
+    /// Backstop for each device call the queue waits on.
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(45)
+    }
 }
 
 /// Opens AFC on a USB-connected phone.
@@ -182,7 +206,7 @@ pub struct DeviceOpener;
 impl Opener for DeviceOpener {
     type Media = MediaFs;
     async fn open(&self, udid: &str) -> Result<MediaFs, DeviceError> {
-        Session::open(udid).await?.media().await
+        Session::open_media(udid).await
     }
 }
 
@@ -319,7 +343,7 @@ impl<O: Opener> Manager<O> {
         let task = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(PROBE_EVERY).await;
-                if let Ok(media) = opener.open(&udid).await {
+                if let Ok(media) = within(opener.timeout(), "connect", opener.open(&udid)).await {
                     let _ = tx.send((udid, media));
                     return;
                 }
@@ -642,6 +666,7 @@ impl<O: Opener> Manager<O> {
                 overwrite: job.overwrite,
                 settings: job.settings.clone(),
                 staging_dir: self.staging_dir.clone(),
+                device_timeout: self.opener.timeout(),
             };
             let udid = job.udid.clone();
             let conn = self
@@ -654,7 +679,7 @@ impl<O: Opener> Manager<O> {
             let task = tokio::spawn(async move {
                 let mut fs = match conn {
                     Some(fs) => fs,
-                    None => match opener.open(&udid).await {
+                    None => match within(opener.timeout(), "connect", opener.open(&udid)).await {
                         Ok(fs) => fs,
                         Err(e) => {
                             let result = Err(if e.is_connection_problem() {

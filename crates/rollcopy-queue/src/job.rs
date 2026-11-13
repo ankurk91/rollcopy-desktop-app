@@ -63,6 +63,8 @@ pub(crate) struct JobSpec {
     pub overwrite: bool,
     pub settings: Settings,
     pub staging_dir: PathBuf,
+    /// Backstop for the first stat (see `queue::within`).
+    pub device_timeout: std::time::Duration,
 }
 
 /// `<pid>-<n>`, unique across jobs, queues and Rollcopy processes.
@@ -171,8 +173,7 @@ async fn run_inner(
 
     // ---- read
     state(JobState::Reading);
-    let total = fs
-        .stat(&plan.source)
+    let total = crate::queue::within(spec.device_timeout, "stat", fs.stat(&plan.source))
         .await
         .map_err(|e| device(Stage::Read, e))?
         .size;

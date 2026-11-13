@@ -368,8 +368,7 @@ async fn connect<'a>(
     udid: &str,
 ) -> Result<&'a mut MediaFs, DeviceError> {
     if !conn.as_ref().is_some_and(|c| c.udid == udid) {
-        let session = Session::open(udid).await?;
-        let fs = session.media().await?;
+        let fs = Session::open_media(udid).await?;
         *conn = Some(Conn {
             udid: udid.to_owned(),
             fs,

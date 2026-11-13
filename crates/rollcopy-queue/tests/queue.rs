@@ -27,6 +27,10 @@ struct FakePhone {
     fail_reads: Arc<Mutex<usize>>,
     /// Reads hang (a wedged phone).
     hang: Arc<AtomicBool>,
+    /// Connecting hangs (stuck in the lockdown handshake).
+    hang_open: Arc<AtomicBool>,
+    /// Stat hangs.
+    hang_stat: Arc<AtomicBool>,
 }
 
 impl FakePhone {
@@ -46,6 +50,9 @@ struct FakeMedia(FakePhone);
 
 impl MediaRead for FakeMedia {
     async fn stat(&mut self, path: &str) -> Result<Stat, DeviceError> {
+        if self.0.hang_stat.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         let files = self.0.files.lock().unwrap();
         let data = files
             .get(path)
@@ -94,7 +101,15 @@ impl MediaRead for FakeMedia {
 impl Opener for FakePhone {
     type Media = FakeMedia;
     async fn open(&self, _udid: &str) -> Result<FakeMedia, DeviceError> {
+        if self.hang_open.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         Ok(FakeMedia(self.clone()))
+    }
+
+    /// Short, so hung calls are given up on quickly in tests.
+    fn timeout(&self) -> Duration {
+        Duration::from_millis(500)
     }
 }
 
@@ -379,6 +394,52 @@ async fn full_disk_pauses_instead_of_failing() {
     .await
     .unwrap();
     assert!(again.contains("disk is full"), "{again}");
+}
+
+/// Audit NEW-02: device calls that never answer.
+#[tokio::test]
+async fn hung_device_calls_pause_and_recover() {
+    let dest = tempfile::tempdir().unwrap();
+    let mut s = Settings::new(dest.path().to_path_buf());
+    s.layout = Layout::Flat;
+    let phone = FakePhone::with(&[("/DCIM/100APPLE/IMG_0001.JPG", b"photo")]);
+    // A stat that never answers pauses the job instead of holding a worker.
+    phone.hang_stat.store(true, Ordering::SeqCst);
+    let mut h = Harness::start(phone.clone(), s);
+    h.add(vec![photo("DCIM/100APPLE", "IMG_0001.JPG", 1_700_000_000)]);
+    let paused = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let QueueEvent::Paused { reason: Some(r) } = h.events.recv().await.unwrap() {
+                return r;
+            }
+        }
+    })
+    .await
+    .expect("a hung stat should pause the queue");
+    assert!(paused.contains("timed out"), "{paused}");
+
+    // Reconnecting hangs too: the probe must give up and try again rather
+    // than wait forever. Once the phone answers, the copy finishes.
+    phone.hang_stat.store(false, Ordering::SeqCst);
+    phone.hang_open.store(true, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(3000)).await;
+    phone.hang_open.store(false, Ordering::SeqCst);
+    let state = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if let QueueEvent::State { state, .. } = h.events.recv().await.unwrap()
+                && state.is_finished()
+            {
+                return state;
+            }
+        }
+    })
+    .await
+    .expect("the queue should resume once the phone answers");
+    assert_eq!(state, JobState::Done);
+    assert_eq!(
+        std::fs::read(dest.path().join("IMG_0001.JPG")).unwrap(),
+        b"photo"
+    );
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {

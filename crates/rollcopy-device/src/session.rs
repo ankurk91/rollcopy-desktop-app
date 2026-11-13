@@ -96,9 +96,38 @@ fn pair_record_error(e: idevice::IdeviceError) -> DeviceError {
     }
 }
 
+/// Longest wait for connecting to a phone: usbmuxd, lockdown and the TLS
+/// session start. A phone that stops answering mid-handshake counts as
+/// disconnected instead of hanging the caller (audit NEW-02).
+pub(crate) const OPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 impl Session {
     /// Connects to the phone with this UDID and starts a lockdown session.
+    /// Gives up after [`OPEN_TIMEOUT`].
     pub async fn open(udid: &str) -> Result<Self> {
+        match tokio::time::timeout(OPEN_TIMEOUT, Self::open_inner(udid)).await {
+            Ok(r) => r,
+            Err(_) => Err(DeviceError::Disconnected(format!(
+                "the phone didn't answer within {} s",
+                OPEN_TIMEOUT.as_secs()
+            ))),
+        }
+    }
+
+    /// Connects and opens the read-only media filesystem, all within
+    /// [`OPEN_TIMEOUT`].
+    pub async fn open_media(udid: &str) -> Result<crate::MediaFs> {
+        let fut = async { Self::open_inner(udid).await?.media().await };
+        match tokio::time::timeout(OPEN_TIMEOUT, fut).await {
+            Ok(r) => r,
+            Err(_) => Err(DeviceError::Disconnected(format!(
+                "the phone didn't answer within {} s",
+                OPEN_TIMEOUT.as_secs()
+            ))),
+        }
+    }
+
+    async fn open_inner(udid: &str) -> Result<Self> {
         let mut mux = UsbmuxdConnection::default()
             .await
             .map_err(usbmuxd_unavailable)?;
@@ -175,8 +204,14 @@ impl Session {
     /// over AFC, read-only. Each call opens an independent connection, so two
     /// can read in parallel.
     pub async fn media(&self) -> Result<MediaFs> {
-        let afc = AfcClient::connect(&self.provider as &dyn IdeviceProvider).await?;
-        Ok(MediaFs::new(afc))
+        let connect = AfcClient::connect(&self.provider as &dyn IdeviceProvider);
+        match tokio::time::timeout(OPEN_TIMEOUT, connect).await {
+            Ok(afc) => Ok(MediaFs::new(afc?)),
+            Err(_) => Err(DeviceError::Disconnected(format!(
+                "the phone's file service didn't start within {} s",
+                OPEN_TIMEOUT.as_secs()
+            ))),
+        }
     }
 }
 
