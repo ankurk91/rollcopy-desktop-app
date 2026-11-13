@@ -48,6 +48,10 @@ pub(crate) struct TransferRow {
     pub progress: Option<(u64, u64)>,
     /// Local time the item finished (done, skipped or failed).
     pub finished_at: Option<chrono::DateTime<chrono::Local>>,
+    /// When the item started reading (reset if it goes back in the queue).
+    pub started: Option<std::time::Instant>,
+    /// How long it took, from starting to read until it finished.
+    pub took: Option<std::time::Duration>,
 }
 
 pub(crate) struct ConflictPrompt {
@@ -288,6 +292,8 @@ impl MainView {
                     state: JobState::Queued,
                     progress: None,
                     finished_at: None,
+                    started: None,
+                    took: None,
                 });
                 t.expanded = true;
                 t.note = None;
@@ -304,6 +310,16 @@ impl MainView {
                         row.progress = None;
                     }
                     row.finished_at = state.is_finished().then(chrono::Local::now);
+                    match &state {
+                        JobState::Queued | JobState::Conflict => {
+                            row.started = None;
+                            row.took = None;
+                        }
+                        JobState::Reading | JobState::Converting | JobState::Verifying => {
+                            row.started.get_or_insert_with(std::time::Instant::now);
+                        }
+                        _ => row.took = row.started.map(|s| s.elapsed()),
+                    }
                     row.state = state;
                 }
             }
@@ -609,6 +625,15 @@ impl MainView {
                 .child(state_label(&r.state, r.progress))
                 .into_any_element(),
             div()
+                .text_color(theme.muted_foreground)
+                .child(
+                    r.took
+                        .or_else(|| r.started.map(|s| s.elapsed()))
+                        .map(took_label)
+                        .unwrap_or_default(),
+                )
+                .into_any_element(),
+            div()
                 .text_xs()
                 .text_color(theme.muted_foreground)
                 .child(
@@ -832,6 +857,19 @@ fn tilde(p: &Path) -> String {
     p.display().to_string()
 }
 
+/// "0.8 s", "14 s", "2 min 05 s".
+pub(crate) fn took_label(d: std::time::Duration) -> String {
+    let s = d.as_secs_f64();
+    if s < 10. {
+        format!("{s:.1} s")
+    } else if s < 60. {
+        format!("{s:.0} s")
+    } else {
+        let s = s.round() as u64;
+        format!("{} min {:02} s", s / 60, s % 60)
+    }
+}
+
 pub(crate) fn state_label(s: &JobState, progress: Option<(u64, u64)>) -> String {
     match s {
         JobState::Queued => "Queued".into(),
@@ -862,5 +900,9 @@ mod tests {
             "Reading 25%"
         );
         assert_eq!(human_size(23_600_000), "23.6 MB");
+        use std::time::Duration;
+        assert_eq!(super::took_label(Duration::from_millis(820)), "0.8 s");
+        assert_eq!(super::took_label(Duration::from_secs(14)), "14 s");
+        assert_eq!(super::took_label(Duration::from_secs(125)), "2 min 05 s");
     }
 }

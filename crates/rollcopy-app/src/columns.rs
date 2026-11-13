@@ -92,6 +92,11 @@ pub(crate) const TRANSFERS: Table = Table {
             min: 80.,
         },
         Col {
+            title: "Took",
+            width: 80.,
+            min: 50.,
+        },
+        Col {
             title: "Finished",
             width: 120.,
             min: 80.,
@@ -293,6 +298,6 @@ mod tests {
         // The trailing buttons column counts too.
         let t = TRANSFERS.widths_from(&[]);
         let max = TRANSFERS.dragged(&t, 0, 5000., 800.);
-        assert_eq!(max, (800. - 2. - 8. - 22. - 96.) - (60. + 80. + 80.));
+        assert_eq!(max, (800. - 2. - 8. - 22. - 96.) - (60. + 80. + 50. + 80.));
     }
 }
