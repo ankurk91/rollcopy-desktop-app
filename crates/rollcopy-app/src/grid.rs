@@ -41,6 +41,17 @@ impl MainView {
         (cols, tile)
     }
 
+    /// Width of the centre pane's content (between its side paddings).
+    fn content_width(&self, window: &Window) -> f32 {
+        let width = window.viewport_size().width / px(1.);
+        let preview = if self.preview_open {
+            self.preview_w
+        } else {
+            0.
+        };
+        (width - LEFT_W - preview - 2. * PAD).max(200.)
+    }
+
     pub(crate) fn render_grid(
         &mut self,
         window: &mut Window,
@@ -52,6 +63,7 @@ impl MainView {
         let (cols, tile) = self.grid_layout(window);
         // The list is one item per row; arrow keys move by one either way.
         let cols = if self.list_view { 1 } else { cols };
+        self.list_row_w = self.content_width(window);
         self.cols = cols;
         self.tile = tile;
         let rows = self.visible.len().div_ceil(cols);
@@ -329,9 +341,18 @@ impl MainView {
             })
     }
 
-    /// Queues thumbnails for the given rows that aren't known yet. Files
-    /// already in the local cache are used directly without asking the phone.
+    /// Queues thumbnails for the grid rows on screen.
     fn request_thumbs(&mut self, rows: Range<usize>, cols: usize) {
+        let start = rows.start * cols;
+        let end = (rows.end * cols).min(self.visible.len());
+        let wanted: Vec<usize> = self.visible[start..end].to_vec();
+        self.request_thumbs_for(&wanted);
+    }
+
+    /// Queues thumbnails for these asset indices that aren't known yet.
+    /// Files already in the local cache are used directly without asking
+    /// the phone.
+    pub(crate) fn request_thumbs_for(&mut self, indices: &[usize]) {
         let Some(udid) = self.udid().map(str::to_owned) else {
             return;
         };
@@ -339,12 +360,11 @@ impl MainView {
         let LibState::Loaded { library, .. } = &self.library else {
             return;
         };
-        let assets = &library.assets;
-        let start = rows.start * cols;
-        let end = (rows.end * cols).min(self.visible.len());
         let mut wanted = Vec::new();
-        for pos in start..end {
-            let a = &assets[self.visible[pos]];
+        for &idx in indices {
+            let Some(a) = library.assets.get(idx) else {
+                continue;
+            };
             let key = a.device_path();
             if self.thumbs.contains_key(&key) {
                 continue;

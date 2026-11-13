@@ -214,6 +214,10 @@ pub struct UiState {
     pub list_view: bool,
     /// List column widths in pixels.
     pub list_columns: Vec<f32>,
+    /// Transfers panel column widths in pixels.
+    pub transfer_columns: Vec<f32>,
+    /// Height of the transfer list in pixels.
+    pub transfers_height: f32,
     /// Unix seconds of the last update check (for the once-a-day limit).
     pub last_update_check: Option<i64>,
 }
@@ -226,6 +230,8 @@ impl Default for UiState {
             transfers_expanded: true,
             list_view: false,
             list_columns: Vec::new(),
+            transfer_columns: Vec::new(),
+            transfers_height: crate::transfers::PANEL_H,
             last_update_check: None,
         }
     }

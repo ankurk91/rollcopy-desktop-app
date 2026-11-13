@@ -10,6 +10,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::resizable::{HandleEdge, resize_handle};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -17,11 +18,26 @@ use gpui_kit::*;
 use rollcopy_library::Asset;
 use rollcopy_queue::{JobId, JobState, QueueCommand, QueueEvent, Settings};
 
+use crate::columns::{ResizeColumn, TRANSFERS, TableKind};
 use crate::view::{MainView, btn, muted};
 use crate::worker::Command;
 
-const PANEL_H: f32 = 220.;
+/// Height of the transfer list, by default and at least.
+pub(crate) const PANEL_H: f32 = 220.;
+pub(crate) const PANEL_MIN_H: f32 = 80.;
 const ROW_H: f32 = 28.;
+/// Panel header and column titles above the list.
+const PANEL_CHROME_H: f32 = 64.;
+
+/// Drag payload for the transfers panel's top edge.
+#[derive(Clone)]
+pub(crate) struct ResizeTransfers;
+
+impl Render for ResizeTransfers {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
+}
 
 pub(crate) struct TransferRow {
     pub id: JobId,
@@ -56,6 +72,12 @@ pub(crate) struct Transfers {
     pub scroll: UniformListScrollHandle,
     /// One-line result of the last panel action ("Exported 3 errors to …").
     pub note: Option<String>,
+    /// Column widths (see `columns::TRANSFERS`).
+    pub widths: Vec<f32>,
+    /// Height of the transfer list.
+    pub height: f32,
+    /// Width of a row this frame, for fitting the columns.
+    pub row_w: f32,
 }
 
 impl Transfers {
@@ -335,10 +357,31 @@ impl MainView {
 
     // ---- bottom panel ----------------------------------------------
 
-    pub(crate) fn render_transfers(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The panel's top edge was dragged.
+    pub(crate) fn resize_transfers(
+        &mut self,
+        ev: &DragMoveEvent<ResizeTransfers>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let win_h = window.viewport_size().height / px(1.);
+        let y = ev.event.position.y / px(1.);
+        // Keep at least half the window for the library.
+        let max = (win_h * 0.6).max(PANEL_MIN_H);
+        self.transfers.height = (win_h - y - PANEL_CHROME_H).clamp(PANEL_MIN_H, max);
+        cx.notify();
+    }
+
+    pub(crate) fn render_transfers(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         if self.transfers.rows.is_empty() {
             return None;
         }
+        // Rows sit between the panel's 16 px side paddings.
+        self.transfers.row_w = window.viewport_size().width / px(1.) - 32.;
         let theme = cx.theme().clone();
         let t = &self.transfers;
         let (done, failed, active, total) = t.counts();
@@ -466,6 +509,7 @@ impl MainView {
             });
 
         let mut panel = v_flex()
+            .relative()
             .w_full()
             .flex_shrink_0()
             .border_t_1()
@@ -476,25 +520,39 @@ impl MainView {
             panel = panel.child(div().px_4().pb_1().child(muted(note, &theme)));
         }
         if t.expanded {
-            // Column headings, same widths as the rows below.
+            // Drag the top edge to make the panel taller or shorter.
             panel = panel.child(
-                h_flex()
-                    .px_4()
-                    .pb_1()
-                    .gap_3()
-                    .text_xs()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme.muted_foreground)
-                    .child(div().w(px(14.)))
-                    .child(div().w(px(130.)).flex_shrink_0().child("File"))
-                    .child(div().w(px(120.)).flex_shrink_0().child("Folder"))
-                    .child(div().flex_1().child("Status"))
-                    .child(div().w(px(110.)).flex_shrink_0().child("Finished")),
+                resize_handle::<ResizeTransfers, ResizeTransfers>("transfers-edge", Axis::Vertical)
+                    .inside(HandleEdge::Leading)
+                    .on_drag(ResizeTransfers, |drag, _, _, cx| cx.new(|_| drag.clone())),
+            );
+            // Column headings: same widths as the rows below.
+            let shown = TRANSFERS.fit(&t.widths, t.row_w);
+            panel = panel.child(
+                div().px_4().child(
+                    TRANSFERS
+                        .row(
+                            &shown,
+                            div().into_any_element(),
+                            TRANSFERS.header_cells(),
+                            None,
+                        )
+                        .id("transfers-header-row")
+                        .h(px(22.))
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.muted_foreground)
+                        .on_drag_move(cx.listener(
+                            |this, ev: &DragMoveEvent<ResizeColumn>, _, cx| {
+                                this.resize_column(TableKind::Transfers, ev, cx)
+                            },
+                        )),
+                ),
             );
             panel = panel.child(
                 div()
                     .relative()
-                    .h(px(PANEL_H))
+                    .h(px(t.height))
                     .child(
                         uniform_list(
                             "transfer-rows",
@@ -535,48 +593,34 @@ impl MainView {
             .map(|p| p.display().to_string())
             .unwrap_or_default();
         let id = r.id;
-        h_flex()
-            .h(px(ROW_H))
-            .w_full()
-            .gap_3()
-            .items_center()
-            .text_sm()
-            .child(div().w(px(14.)).text_color(color).child(icon))
-            .child(div().w(px(130.)).flex_shrink_0().child(r.name.clone()))
-            .child(
-                div()
-                    .w(px(120.))
-                    .flex_shrink_0()
-                    .text_color(theme.muted_foreground)
-                    .child(folder),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .text_color(if matches!(r.state, JobState::Failed { .. }) {
-                        theme.danger
-                    } else {
-                        theme.muted_foreground
-                    })
-                    .child(state_label(&r.state, r.progress)),
-            )
-            .child(
-                div()
-                    .w(px(110.))
-                    .flex_shrink_0()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(
-                        r.finished_at
-                            .map(|t| t.format("%-d %b %H:%M:%S").to_string())
-                            .unwrap_or_default(),
-                    ),
-            )
-            .when(matches!(r.state, JobState::Failed { .. }), |d| {
+        let failed = matches!(r.state, JobState::Failed { .. });
+        let cells = vec![
+            div().child(r.name.clone()).into_any_element(),
+            div()
+                .text_color(theme.muted_foreground)
+                .child(folder)
+                .into_any_element(),
+            div()
+                .text_color(if failed {
+                    theme.danger
+                } else {
+                    theme.muted_foreground
+                })
+                .child(state_label(&r.state, r.progress))
+                .into_any_element(),
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(
+                    r.finished_at
+                        .map(|t| t.format("%-d %b %H:%M:%S").to_string())
+                        .unwrap_or_default(),
+                )
+                .into_any_element(),
+        ];
+        let actions = h_flex()
+            .gap_1()
+            .when(failed, |d| {
                 d.child(
                     btn(("retry", id as usize))
                         .xsmall()
@@ -599,6 +643,20 @@ impl MainView {
                         })),
                 )
             })
+            .into_any_element();
+        let shown = TRANSFERS.fit(&self.transfers.widths, self.transfers.row_w);
+        TRANSFERS
+            .row(
+                &shown,
+                div().text_color(color).child(icon).into_any_element(),
+                cells,
+                Some(actions),
+            )
+            .id(("transfer", i))
+            .h(px(ROW_H))
+            .rounded_md()
+            .text_sm()
+            .hover(|s| s.bg(theme.muted))
             .into_any_element()
     }
 

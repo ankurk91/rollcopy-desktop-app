@@ -1,145 +1,67 @@
 //! List view of the library: one row per item, no thumbnails (faster, and
-//! nothing to see over your shoulder). Header and rows are built by the
-//! same function from the same column widths, so they always line up;
-//! columns are resized by dragging their right edge in the header.
+//! nothing to see over your shoulder). Columns: `columns::LIBRARY`.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::h_flex;
-use gpui_kit::component::resizable::{HandleEdge, resize_handle};
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, Theme};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rollcopy_library::MediaKind;
 
+use crate::columns::{LIBRARY, ResizeColumn, TRANSFERS, TableKind};
 use crate::view::MainView;
 
 pub(crate) const ROW_H: f32 = 32.;
-/// Space inside a row before the first column.
-const ROW_PAD: f32 = 8.;
-/// Fixed first column: selection tick, photo/video icon, copied mark.
-const MARK_W: f32 = 64.;
-
-/// Resizable columns: (title, default width, minimum width). The last one
-/// also takes any room left over.
-pub(crate) const COLUMNS: [(&str, f32, f32); 5] = [
-    ("Name", 220., 80.),
-    ("Taken", 150., 80.),
-    ("Size", 110., 60.),
-    ("File size", 90., 60.),
-    ("Tags", 140., 60.),
-];
-
-/// Column widths from saved state, or the defaults when they don't fit.
-pub(crate) fn widths_from(saved: &[f32]) -> Vec<f32> {
-    if saved.len() == COLUMNS.len() {
-        saved
-            .iter()
-            .zip(COLUMNS)
-            .map(|(w, (_, _, min))| w.max(min))
-            .collect()
-    } else {
-        COLUMNS.iter().map(|(_, w, _)| *w).collect()
-    }
-}
-
-/// x of the left edge of column `col`, relative to the row's left edge.
-fn column_start(widths: &[f32], col: usize) -> f32 {
-    ROW_PAD + MARK_W + widths[..col].iter().sum::<f32>()
-}
-
-/// New width for column `col` when its edge is dragged to `x` (relative to
-/// the row's left edge).
-pub(crate) fn dragged_width(widths: &[f32], col: usize, x: f32) -> f32 {
-    (x - column_start(widths, col)).clamp(COLUMNS[col].2, 1200.)
-}
-
-/// Drag payload for a column edge.
-#[derive(Clone)]
-pub(crate) struct ResizeColumn(pub usize);
-
-impl Render for ResizeColumn {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        Empty
-    }
-}
-
-/// One row (header or item) laid out on the column widths.
-fn row_frame(widths: &[f32], mark: AnyElement, cells: Vec<AnyElement>) -> Div {
-    let last = cells.len().saturating_sub(1);
-    h_flex()
-        .h(px(ROW_H))
-        .w_full()
-        .pl(px(ROW_PAD))
-        .items_center()
-        .child(h_flex().w(px(MARK_W)).flex_shrink_0().gap_1().child(mark))
-        .children(cells.into_iter().enumerate().map(|(i, cell)| {
-            div()
-                .relative()
-                .h_full()
-                .flex()
-                .items_center()
-                .pr_2()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .map(|d| {
-                    if i == last {
-                        d.flex_1().min_w(px(widths[i]))
-                    } else {
-                        d.w(px(widths[i])).flex_shrink_0()
-                    }
-                })
-                .child(cell)
-        }))
-}
 
 impl MainView {
     pub(crate) fn render_list_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let cells = COLUMNS
-            .iter()
-            .enumerate()
-            .map(|(i, (title, _, _))| {
-                div()
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .child(*title)
-                    .child(
-                        resize_handle::<ResizeColumn, ResizeColumn>(
-                            ("col-edge", i),
-                            Axis::Horizontal,
-                        )
-                        .inside(HandleEdge::Trailing)
-                        .on_drag(ResizeColumn(i), |drag, _, _, cx| cx.new(|_| drag.clone())),
-                    )
-                    .into_any_element()
-            })
-            .collect();
+        let shown = LIBRARY.fit(&self.list_widths, self.list_row_w);
         div()
             .mx(px(crate::grid::PAD))
             .border_b_1()
             .border_color(theme.border)
             .child(
-                row_frame(&self.list_widths, div().into_any_element(), cells)
+                LIBRARY
+                    .row(
+                        &shown,
+                        div().into_any_element(),
+                        LIBRARY.header_cells(),
+                        None,
+                    )
                     .id("list-header")
-                    .border_1()
-                    .border_color(transparent_black())
+                    .h(px(ROW_H))
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .on_drag_move(cx.listener(Self::resize_list_column)),
+                    .on_drag_move(
+                        cx.listener(|this, ev: &DragMoveEvent<ResizeColumn>, _, cx| {
+                            this.resize_column(TableKind::Library, ev, cx)
+                        }),
+                    ),
             )
     }
 
-    fn resize_list_column(
+    /// A column edge was dragged in the header of `table`.
+    pub(crate) fn resize_column(
         &mut self,
+        table: TableKind,
         ev: &DragMoveEvent<ResizeColumn>,
-        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let col = ev.drag(cx).0;
+        let drag = ev.drag(cx).clone();
+        if drag.table != table {
+            return;
+        }
         let x = (ev.event.position.x - ev.bounds.origin.x) / px(1.);
-        self.list_widths[col] = dragged_width(&self.list_widths, col, x);
+        let row_w = ev.bounds.size.width / px(1.);
+        let (spec, widths) = match table {
+            TableKind::Library => (&LIBRARY, &mut self.list_widths),
+            TableKind::Transfers => (&TRANSFERS, &mut self.transfers.widths),
+        };
+        // Start from what's on screen, so a squeezed column doesn't jump.
+        let mut shown = spec.fit(widths, row_w);
+        shown[drag.col] = spec.dragged(&shown, drag.col, x, row_w);
+        *widths = shown;
         cx.notify();
     }
 
@@ -218,18 +140,15 @@ impl MainView {
             text(tags.join(" · "), Some(muted)),
         ];
 
-        row_frame(&self.list_widths, mark, cells)
+        let shown = LIBRARY.fit(&self.list_widths, self.list_row_w);
+        LIBRARY
+            .row(&shown, mark, cells, None)
             .id(("row", pos))
+            .h(px(ROW_H))
             .rounded_md()
             .text_sm()
             .cursor_pointer()
-            // Same 1 px border as the header, so the columns line up.
-            .border_1()
-            .border_color(if focused {
-                theme.ring
-            } else {
-                transparent_black()
-            })
+            .when(focused, |d| d.border_color(theme.ring))
             .when(selected, |d| d.bg(theme.accent))
             .when(!selected, |d| d.hover(|s| s.bg(theme.muted)))
             .when(a.trashed, |d| d.text_color(muted))
@@ -239,30 +158,5 @@ impl MainView {
                 cx.notify();
             }))
             .into_any_element()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{COLUMNS, dragged_width, widths_from};
-
-    #[test]
-    fn saved_widths_are_used_when_they_fit() {
-        let defaults: Vec<f32> = COLUMNS.iter().map(|c| c.1).collect();
-        assert_eq!(widths_from(&[]), defaults);
-        assert_eq!(widths_from(&[1., 2.]), defaults);
-        let w = widths_from(&[300., 10., 120., 90., 140.]);
-        assert_eq!(w, vec![300., COLUMNS[1].2, 120., 90., 140.]);
-    }
-
-    #[test]
-    fn dragging_an_edge_sets_that_column() {
-        let w = widths_from(&[]);
-        // Name starts after the row padding and the mark column (72 px).
-        assert_eq!(dragged_width(&w, 0, 72. + 250.), 250.);
-        // Taken starts after Name.
-        assert_eq!(dragged_width(&w, 1, 72. + 220. + 180.), 180.);
-        // Never narrower than the minimum.
-        assert_eq!(dragged_width(&w, 0, 0.), COLUMNS[0].2);
     }
 }

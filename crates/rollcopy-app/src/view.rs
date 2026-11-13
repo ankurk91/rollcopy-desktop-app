@@ -179,8 +179,10 @@ pub struct MainView {
     pub(crate) revealed: HashSet<String>,
     /// List view (no thumbnails) instead of the grid.
     pub(crate) list_view: bool,
-    /// List column widths (see `list::COLUMNS`).
+    /// List column widths (see `columns::LIBRARY`).
     pub(crate) list_widths: Vec<f32>,
+    /// Width of a list row this frame, for fitting the columns.
+    pub(crate) list_row_w: f32,
     /// Copy settings the copied state in `in_dest` was worked out for.
     pub(crate) copied_for: Option<rollcopy_queue::Settings>,
     /// Bumped per copied-state scan; older scans' results are dropped.
@@ -323,7 +325,8 @@ impl MainView {
             full: HashMap::new(),
             revealed: HashSet::new(),
             list_view: saved_ui.list_view,
-            list_widths: crate::list::widths_from(&saved_ui.list_columns),
+            list_widths: crate::columns::LIBRARY.widths_from(&saved_ui.list_columns),
+            list_row_w: 800.,
             copied_for: None,
             copied_gen: 0,
             image_dims: HashMap::new(),
@@ -340,6 +343,9 @@ impl MainView {
             reloading: false,
             transfers: Transfers {
                 expanded: saved_ui.transfers_expanded,
+                widths: crate::columns::TRANSFERS.widths_from(&saved_ui.transfer_columns),
+                height: saved_ui.transfers_height.max(crate::transfers::PANEL_MIN_H),
+                row_w: 800.,
                 ..Transfers::default()
             },
             config,
@@ -1154,9 +1160,16 @@ impl Render for MainView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let center = self.render_center(window, cx);
-        let transfers = self.render_transfers(cx);
+        let transfers = self.render_transfers(window, cx);
         let conflict = self.render_conflict(cx);
         let toolbar = self.render_toolbar(cx).into_any_element();
+        // The preview pane and viewer need the focused item's thumbnail even
+        // when the grid didn't ask for it (list view loads none).
+        if (self.preview_open || self.viewer_open)
+            && let Some(idx) = self.focused
+        {
+            self.request_thumbs_for(&[idx]);
+        }
         let viewer = self.render_viewer(window, cx);
         let ready = matches!(self.library, LibState::Loaded { .. })
             && matches!(self.phase, Phase::Ready { .. });
@@ -1202,6 +1215,7 @@ impl Render for MainView {
                 cx.notify();
             }))
             .on_drag_move(cx.listener(Self::resize_preview))
+            .on_drag_move(cx.listener(Self::resize_transfers))
             .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
             .on_action(cx.listener(|this, _: &ReportIssue, _, cx| this.report_issue(cx)))
             .on_action(cx.listener(|this, _: &ReloadLibrary, _, cx| {
@@ -1561,8 +1575,12 @@ impl MainView {
         let (preview, expanded) = (self.preview_w, self.transfers.expanded);
         let list_view = self.list_view;
         let list_columns = self.list_widths.clone();
+        let transfer_columns = self.transfers.widths.clone();
+        let transfers_height = self.transfers.height;
         Prefs::update_ui(cx, |ui| {
             ui.list_columns = list_columns;
+            ui.transfer_columns = transfer_columns;
+            ui.transfers_height = transfers_height;
             ui.window = Some(saved);
             ui.preview_width = preview;
             ui.transfers_expanded = expanded;

@@ -1,6 +1,7 @@
 //! Rollcopy desktop app (binary: `rollcopy`).
 
 mod about;
+mod columns;
 mod config;
 mod grid;
 mod icons;
