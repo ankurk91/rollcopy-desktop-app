@@ -138,10 +138,7 @@ impl MainView {
     /// Where the item's copy is, relative to the Save-to folder, if it's there.
     fn copied_to(&self, a: &Asset) -> Option<String> {
         let settings = self.copy_settings()?;
-        let dest = match self.in_dest.get(&a.device_path()) {
-            Some(known) => known.clone()?,
-            None => rollcopy_queue::find_copy(&settings, a)?,
-        };
+        let dest = self.in_dest.get(&a.device_path())?.clone()?;
         Some(
             dest.strip_prefix(&settings.dest)
                 .map(|p| p.display().to_string())

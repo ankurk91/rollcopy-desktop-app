@@ -2,7 +2,7 @@
 //! dialog): starting copies, the destination folder, the queue panel and the
 //! "already exists" prompt. The work itself runs in `rollcopy-queue`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -115,8 +115,8 @@ impl MainView {
     }
 
     /// Called when a phone becomes ready: tell the queue where to copy.
-    pub(crate) fn on_device_ready(&mut self) {
-        self.sync_queue_settings();
+    pub(crate) fn on_device_ready(&mut self, cx: &mut Context<Self>) {
+        self.sync_queue_settings(cx);
     }
 
     /// Tells the queue the current settings (destination etc.).
@@ -128,11 +128,15 @@ impl MainView {
         }
     }
 
-    /// Destination changed: send it and recheck what's already copied there.
-    pub(crate) fn sync_queue_settings(&mut self) {
+    /// Settings may have changed: send them, and if the destination or
+    /// layout changed, recheck what's already copied there.
+    pub(crate) fn sync_queue_settings(&mut self, cx: &mut Context<Self>) {
         self.send_queue_settings();
-        self.in_dest.clear();
-        self.recompute_visible();
+        if self.copy_settings() != self.copied_for {
+            self.in_dest.clear();
+            self.refresh_copied(cx);
+            self.recompute_visible();
+        }
     }
 
     pub(crate) fn copy_assets(&mut self, assets: Vec<Asset>) {
@@ -221,10 +225,16 @@ impl MainView {
             let Ok(Ok(Some(out))) = rx.await else {
                 return;
             };
-            let note = match rollcopy_queue::History::open(&history)
-                .map_err(|e| e.to_string())
-                .and_then(|h| h.export_csv(&out).map_err(|e| e.to_string()))
-            {
+            // SQLite and file I/O off the UI thread (audit PERF-02).
+            let export = cx.background_executor().spawn({
+                let out = out.clone();
+                async move {
+                    rollcopy_queue::History::open(&history)
+                        .map_err(|e| e.to_string())
+                        .and_then(|h| h.export_csv(&out).map_err(|e| e.to_string()))
+                }
+            });
+            let note = match export.await {
                 Ok(n) => format!("Exported {n} error(s) to {}", out.display()),
                 Err(e) => format!("Couldn't export: {e}"),
             };
@@ -312,6 +322,7 @@ impl MainView {
             }
             QueueEvent::ConflictCleared => t.conflict = None,
             QueueEvent::Cleared { ids } => {
+                let ids: HashSet<JobId> = ids.into_iter().collect();
                 t.rows.retain(|r| !ids.contains(&r.id));
                 t.index = t.rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
             }

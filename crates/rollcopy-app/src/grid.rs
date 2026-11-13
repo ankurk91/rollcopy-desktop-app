@@ -277,7 +277,6 @@ impl MainView {
         let Some(udid) = self.udid().map(str::to_owned) else {
             return;
         };
-        let settings = self.copy_settings();
         // Borrow fields, not `self`, so the caches can be updated in the loop.
         let LibState::Loaded { library, .. } = &self.library else {
             return;
@@ -289,12 +288,6 @@ impl MainView {
         for pos in start..end {
             let a = &assets[self.visible[pos]];
             let key = a.device_path();
-            if !self.in_dest.contains_key(&key)
-                && let Some(settings) = &settings
-            {
-                let there = rollcopy_queue::find_copy(settings, a);
-                self.in_dest.insert(key.clone(), there);
-            }
             if self.thumbs.contains_key(&key) {
                 continue;
             }

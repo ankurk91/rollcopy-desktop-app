@@ -39,6 +39,10 @@ pub enum Event {
         key: String,
         result: Result<PathBuf, String>,
     },
+    /// A full-size request was dropped for newer ones; ask again if needed.
+    FullImageDropped {
+        key: String,
+    },
     /// Whether a tray host accepted the icon.
     TrayAvailable(bool),
     Tray(crate::tray::TrayAction),
@@ -363,6 +367,8 @@ async fn serve_commands(
     let mut queue: VecDeque<(String, ThumbReq)> = VecDeque::new();
     let mut queued: HashSet<String> = HashSet::new();
     let mut conn: Option<Conn> = None;
+    let (full_tx, full_rx) = async_channel::unbounded::<FullReq>();
+    tokio::spawn(serve_full(full_rx, tx.clone()));
 
     loop {
         // Take everything that arrived; block only when idle.
@@ -401,13 +407,11 @@ async fn serve_commands(
                     source,
                     dest,
                 } => {
-                    let tx = tx.clone();
-                    tokio::spawn(async move {
-                        let result = fetch_full(&udid, &source, &dest)
-                            .await
-                            .map(|()| dest)
-                            .map_err(|e| e.to_string());
-                        let _ = tx.send(Event::FullImage { key, result }).await;
+                    let _ = full_tx.try_send(FullReq {
+                        udid,
+                        key,
+                        source,
+                        dest,
                     });
                 }
                 Command::Open {
@@ -486,6 +490,55 @@ fn part_path(dest: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
+struct FullReq {
+    udid: String,
+    key: String,
+    source: String,
+    dest: PathBuf,
+}
+
+/// Viewer requests kept waiting: the photo on screen and its neighbours.
+const FULL_KEEP: usize = 3;
+
+/// Serves viewer requests one at a time over one connection. Holding ← or
+/// → asks for many photos; only the newest [`FULL_KEEP`] are kept, so the
+/// phone isn't flooded with sessions and memory isn't flooded with decodes
+/// (audit PERF-01).
+async fn serve_full(rx: async_channel::Receiver<FullReq>, tx: async_channel::Sender<Event>) {
+    let mut wanted: VecDeque<FullReq> = VecDeque::new();
+    let mut conn: Option<Conn> = None;
+    loop {
+        if wanted.is_empty() {
+            match rx.recv().await {
+                Ok(r) => wanted.push_back(r),
+                Err(_) => return,
+            }
+        }
+        while let Ok(r) = rx.try_recv() {
+            wanted.push_back(r);
+        }
+        while wanted.len() > FULL_KEEP {
+            if let Some(old) = wanted.pop_front() {
+                let _ = tx.send(Event::FullImageDropped { key: old.key }).await;
+            }
+        }
+        let Some(req) = wanted.pop_front() else {
+            continue;
+        };
+        let result = fetch_full(&mut conn, &req.udid, &req.source, &req.dest).await;
+        if result.is_err() {
+            conn = None;
+        }
+        let result = result.map(|()| req.dest).map_err(|e| e.to_string());
+        let _ = tx
+            .send(Event::FullImage {
+                key: req.key,
+                result,
+            })
+            .await;
+    }
+}
+
 /// Longest side of viewer images: sharp on a 4K screen, a fraction of a
 /// 48 MP photo's memory (audit PERF-01).
 const VIEW_MAX_SIDE: u32 = 3000;
@@ -493,15 +546,19 @@ const VIEW_MAX_SIDE: u32 = 3000;
 /// Copies a photo from the phone for the viewer as an upright, screen-sized
 /// JPEG (HEIC decoded, EXIF rotation applied). Formats that can't be read
 /// are shown as they are.
-async fn fetch_full(udid: &str, source: &str, dest: &Path) -> Result<(), DeviceError> {
+async fn fetch_full(
+    conn: &mut Option<Conn>,
+    udid: &str,
+    source: &str,
+    dest: &Path,
+) -> Result<(), DeviceError> {
     if tokio::fs::try_exists(dest).await.unwrap_or(false) {
         return Ok(());
     }
     if let Some(dir) = dest.parent() {
         tokio::fs::create_dir_all(dir).await?;
     }
-    let mut conn = None;
-    connect(&mut conn, udid).await?;
+    connect(conn, udid).await?;
     let fs = &mut conn.as_mut().expect("connected").fs;
     let part = part_path(dest);
     // Keep the source's extension: the decoder goes by it for HEIC.

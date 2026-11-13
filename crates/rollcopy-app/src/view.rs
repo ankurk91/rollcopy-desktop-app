@@ -174,6 +174,10 @@ pub struct MainView {
     pub(crate) viewer_open: bool,
     /// Full-size photos for the viewer, by device path.
     pub(crate) full: HashMap<String, crate::viewer::Full>,
+    /// Copy settings the copied state in `in_dest` was worked out for.
+    pub(crate) copied_for: Option<rollcopy_queue::Settings>,
+    /// Bumped per copied-state scan; older scans' results are dropped.
+    pub(crate) copied_gen: u64,
     /// Pixel sizes of images shown in the viewer, read once per file.
     pub(crate) image_dims: HashMap<PathBuf, Option<(u32, u32)>>,
     /// Items per filter chip for the current tree selection, cached so the
@@ -238,9 +242,19 @@ impl MainView {
         let tray_tx = worker.tray;
         // `spawn_in` so event handling can reach the window (tray "Show").
         let task = cx.spawn_in(window, async move |this, cx| {
-            while let Ok(ev) = events.recv().await {
+            while let Ok(first) = events.recv().await {
+                // Take everything already waiting and redraw once: copies
+                // send many progress events (audit PERF-04).
+                let mut batch = vec![first];
+                while batch.len() < 512
+                    && let Ok(ev) = events.try_recv()
+                {
+                    batch.push(ev);
+                }
                 let alive = this.update_in(cx, |view, window, cx| {
-                    view.on_event(ev, window, cx);
+                    for ev in batch {
+                        view.on_event(ev, window, cx);
+                    }
                     view.after_event(window);
                     cx.notify();
                 });
@@ -269,7 +283,7 @@ impl MainView {
             if hidden_changed {
                 this.rebuild_tree(cx);
             }
-            this.sync_queue_settings();
+            this.sync_queue_settings(cx);
             cx.notify();
         });
         // Ask before closing while copies are running (PLAN §6 tray rule; the
@@ -300,6 +314,8 @@ impl MainView {
             thumbs: HashMap::new(),
             viewer_open: false,
             full: HashMap::new(),
+            copied_for: None,
+            copied_gen: 0,
             image_dims: HashMap::new(),
             filter_counts: [0; 4],
             sync_filter: SyncFilter::All,
@@ -349,6 +365,11 @@ impl MainView {
                 };
                 self.full.insert(key, state);
             }
+            Event::FullImageDropped { key } => {
+                if matches!(self.full.get(&key), Some(crate::viewer::Full::Pending)) {
+                    self.full.remove(&key);
+                }
+            }
             Event::Tray(action) => self.on_tray_action(action, window, cx),
             Event::Phase(p) => {
                 eprintln!("phase: {}", phase_label(&p));
@@ -364,7 +385,7 @@ impl MainView {
                 }
                 if matches!(p, Phase::Ready { .. }) {
                     self.phase = p;
-                    self.on_device_ready();
+                    self.on_device_ready(cx);
                 } else {
                     self.phase = p;
                 }
@@ -404,6 +425,7 @@ impl MainView {
                 let keys: HashSet<String> = self.assets().iter().map(|a| a.device_path()).collect();
                 self.selected.retain(|k| keys.contains(k));
                 self.forget_hidden_thumbs(cx);
+                self.refresh_copied(cx);
                 self.counts_dirty = true;
                 self.recompute_visible();
             }
@@ -502,12 +524,12 @@ impl MainView {
 
     /// Rebuilds the grid's item list after the tree selection, filter or
     /// library changed. Clears the multi-selection (it belongs to a view).
-    /// Rebuilds the chip counts and fills the copied-state cache for every
-    /// item in the current tree selection (one file check each, cached).
+    /// Rebuilds the chip counts for the current tree selection. Copied state
+    /// comes from [`MainView::refresh_copied`]; items not checked yet count
+    /// as not copied.
     pub(crate) fn recount(&mut self) {
         let (sel, filter) = (self.selection, self.filter);
         let show_hidden = self.config.library.show_hidden;
-        let settings = self.copy_settings();
         let LibState::Loaded { library, .. } = &self.library else {
             self.filter_counts = [0; 4];
             self.sync_counts = [0; 3];
@@ -528,23 +550,57 @@ impl MainView {
             if !filter.matches(a) {
                 continue;
             }
-            let key = a.device_path();
-            let copied = match (self.in_dest.get(&key), &settings) {
-                (Some(c), _) => c.is_some(),
-                (None, Some(s)) => {
-                    let c = rollcopy_queue::find_copy(s, a);
-                    let copied = c.is_some();
-                    self.in_dest.insert(key, c);
-                    copied
-                }
-                (None, None) => false,
-            };
+            let copied = matches!(self.in_dest.get(&a.device_path()), Some(Some(_)));
             sync[0] += 1;
             sync[if copied { 1 } else { 2 }] += 1;
         }
         self.filter_counts = counts;
         self.sync_counts = sync;
         self.counts_dirty = false;
+    }
+
+    /// Works out which items are already in the destination, on a
+    /// background thread (one or two file checks per item; on a network or
+    /// sleeping USB disk that froze the window, audit PERF-02).
+    pub(crate) fn refresh_copied(&mut self, cx: &mut Context<Self>) {
+        let Some(settings) = self.copy_settings() else {
+            self.in_dest.clear();
+            self.copied_for = None;
+            return;
+        };
+        self.copied_for = Some(settings.clone());
+        self.copied_gen += 1;
+        let generation = self.copied_gen;
+        let assets: Vec<rollcopy_library::Asset> = self
+            .assets()
+            .iter()
+            .filter(|a| !a.trashed)
+            .cloned()
+            .collect();
+        let scan = cx.background_executor().spawn(async move {
+            assets
+                .iter()
+                .map(|a| (a.device_path(), rollcopy_queue::find_copy(&settings, a)))
+                .collect::<HashMap<_, _>>()
+        });
+        cx.spawn(async move |this, cx| {
+            let found = scan.await;
+            let _ = this.update(cx, |view, cx| {
+                if view.copied_gen != generation {
+                    return;
+                }
+                for (key, place) in found {
+                    // A copy that finished during the scan stays known.
+                    if place.is_some() || !matches!(view.in_dest.get(&key), Some(Some(_))) {
+                        view.in_dest.insert(key, place);
+                    }
+                }
+                view.counts_dirty = true;
+                view.recompute_visible();
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Whether the item with this device path is known to be copied.

@@ -11,8 +11,9 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::layout::Settings;
 use crate::queue::{JobId, JobState, QueueEvent, Stage};
 
-/// Emit progress at most this often (bytes).
-const PROGRESS_STEP: u64 = 512 * 1024;
+/// Emit progress at most this often (audit PERF-04); the last byte count is
+/// always sent.
+const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
 
 pub(crate) enum JobError {
     /// Phone gone, locked out, or the link dropped: pause, don't fail.
@@ -187,11 +188,11 @@ async fn run_inner(
         .map_err(|e| failed(Stage::Write, e))?;
 
     let read_to = if work == Work::Copy { part } else { staging };
-    let mut last = 0u64;
+    let mut last = std::time::Instant::now();
     let copied = fs
         .copy_to_local(&plan.source, read_to, |done| {
-            if done - last >= PROGRESS_STEP || done == total {
-                last = done;
+            if last.elapsed() >= PROGRESS_EVERY || done == total {
+                last = std::time::Instant::now();
                 let _ = events.send(QueueEvent::Progress { id, done, total });
             }
         })
