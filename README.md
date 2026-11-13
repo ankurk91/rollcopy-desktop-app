@@ -13,18 +13,19 @@ on the way.
 
 ![Rollcopy on Linux Mint: an iPhone photo library by year and month with Hidden and Recently Deleted, a thumbnail grid with copied badges and filters, the preview pane with photo details, and the transfer queue](.github/screenshot.jpg)
 
-> **Status:** early (0.2.0). Linux only, tested on Linux Mint 22 (Cinnamon, X11) with iOS 27.
+> **Status:** early (0.3.0). Linux only, tested on Linux Mint 22 (Cinnamon, X11) with iOS 27.
 
 ## Features
 
-- **Browse the Photos library**: thumbnails by year and month or by album, filters (photos, videos, edited,
-  copied / not copied), sort by date taken, keyboard navigation, and a full-window viewer
-  (Space). A **list view** shows names, dates and sizes without any thumbnails: quicker, and
-  nothing on screen for people looking over your shoulder. New photos taken while the phone is plugged in appear with **Reload** (F5).
+- **Browse the Photos library**: by year and month, or by **album**; filters (photos, videos,
+  edited, copied / not copied), sort by date taken, keyboard navigation, and a full-window viewer
+  (Space). A **list view** with resizable columns shows names, dates and sizes without any
+  thumbnails: quicker, and nothing on screen for people looking over your shoulder. Photos taken
+  while the phone is plugged in appear with **Reload** (F5).
 - **Private by default**: the Hidden album (locked by Face ID on the phone) and Recently Deleted
   aren't shown or copied unless you turn them on in Preferences, and then only under their own
-  entries, never in "All media". Even then, Hidden items stay blurred until you click the 👁 on
-  each one.
+  entries, never in "All media" or albums. Even then, Hidden items stay blurred (in the grid, the
+  preview and the viewer) until you click the 👁 on each one.
 - **Details for each item**: date and time zone, size, camera and lens, the app that saved it
   (Camera, WhatsApp, Snapchat, …), place name, location (open it in Google Maps), albums.
 - **Android/PC-friendly copies**:
@@ -37,9 +38,10 @@ on the way.
   capture time. iPhones reuse names like `IMG_0057` after 9,999 photos; a different photo with the
   same name is saved as `IMG_0057 (2).JPG`, never over another file. For an item copied before, you
   choose Ask / Skip / Overwrite.
-- **Transfer queue** with progress, pause/resume, cancel, retry and an exportable error report.
-  Unplugging or locking the phone pauses the queue instead of failing items, and it carries on when
-  the phone is back. A full disk pauses it too.
+- **Transfer queue** with progress, time taken per item, pause/resume, cancel, retry and an
+  exportable error report; the panel and its columns can be resized. Unplugging or locking the phone
+  pauses the queue instead of failing items, and it carries on when the phone is back. A full disk
+  pauses it too.
 - **Tray icon and notifications**: closing the window during a copy keeps Rollcopy running in the tray;
   starting Rollcopy again brings the window back.
 - **Preferences** for the destination, folder layout, JPEG quality, video format and theme.
@@ -77,14 +79,14 @@ Download the latest `.deb` or `.AppImage` from
 **.deb** (installs `usbmuxd` and `ffmpeg` if needed):
 
 ```sh
-sudo apt install ./rollcopy_0.2.0-1_amd64.deb
+sudo apt install ./rollcopy_0.3.0-1_amd64.deb
 ```
 
 **AppImage** (install `usbmuxd` and `ffmpeg` first, see Requirements):
 
 ```sh
-chmod +x Rollcopy-0.2.0-x86_64.AppImage
-./Rollcopy-0.2.0-x86_64.AppImage
+chmod +x Rollcopy-0.3.0-x86_64.AppImage
+./Rollcopy-0.3.0-x86_64.AppImage
 ```
 
 **From source** for your user only (see [Building from source](#building-from-source)):
@@ -99,7 +101,8 @@ packaging/install-local.sh --uninstall
 1. Connect the iPhone with a cable and unlock it.
 2. Tap **Trust** on the phone and enter your passcode when asked.
 3. Pick items (click, Ctrl/Shift+click, Ctrl+A, arrow keys) and press **Copy selected**, or
-   **Copy all** for the year or month you're viewing.
+   **Copy all** for the year, month or album you're viewing. Switch between the grid and the list
+   with the buttons next to *Newest first*.
 4. Change where files go with **Save to** (📁) or in **Preferences** (⚙ or Ctrl+,).
 5. Took new photos while plugged in? Press **↻** next to the phone's name (or F5).
 
