@@ -291,7 +291,7 @@ impl MainView {
             if !self.in_dest.contains_key(&key)
                 && let Some(settings) = &settings
             {
-                let there = rollcopy_queue::dest_path(settings, a).exists();
+                let there = rollcopy_queue::find_copy(settings, a);
                 self.in_dest.insert(key.clone(), there);
             }
             if self.thumbs.contains_key(&key) {
@@ -404,7 +404,7 @@ impl MainView {
                     .when(a.is_edited(), |d| d.child(badge("EDITED".into()))),
             )
             // Already in the Save-to folder (from what's on disk, PLAN §7.5).
-            .when(self.in_dest.get(&key) == Some(&true), |d| {
+            .when(self.is_copied(&key), |d| {
                 d.child(
                     div()
                         .id(("copied", pos))

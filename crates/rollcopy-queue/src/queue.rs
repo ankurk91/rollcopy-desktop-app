@@ -4,15 +4,16 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::SystemTime;
 
-use rollcopy_device::{DeviceError, MediaFs, Session};
+use rollcopy_device::{DeviceError, MediaFs, MediaRead, Session};
 use rollcopy_library::Asset;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::history::{FailureRecord, History};
 use crate::job::{self, JobError, JobSpec};
-use crate::layout::{ConflictPolicy, Settings, dest_path, output_name};
+use crate::layout::{ConflictPolicy, Settings, Target, output_name, resolve_dest};
 
 pub type JobId = u64;
 
@@ -116,6 +117,12 @@ pub enum QueueEvent {
     Paused {
         reason: Option<String>,
     },
+    /// A job's destination changed: the name it had was taken by the time it
+    /// started, so it goes to `IMG_0057 (2).JPG` or similar instead.
+    Retarget {
+        id: JobId,
+        dest: PathBuf,
+    },
     /// The first unanswered conflict (PLAN §7.5 dialog).
     Conflict {
         id: JobId,
@@ -146,6 +153,23 @@ impl QueueHandle {
     }
 }
 
+/// Opens a read-only connection to a phone's media. The real one goes through
+/// usbmuxd; tests use a fake phone.
+pub trait Opener: Send + Sync + 'static {
+    type Media: MediaRead + 'static;
+    fn open(&self, udid: &str) -> impl Future<Output = Result<Self::Media, DeviceError>> + Send;
+}
+
+/// Opens AFC on a USB-connected phone.
+pub struct DeviceOpener;
+
+impl Opener for DeviceOpener {
+    type Media = MediaFs;
+    async fn open(&self, udid: &str) -> Result<MediaFs, DeviceError> {
+        Session::open(udid).await?.media().await
+    }
+}
+
 /// Starts the queue manager on the current tokio runtime.
 pub fn spawn(
     settings: Settings,
@@ -153,8 +177,21 @@ pub fn spawn(
     history: Option<History>,
     events: UnboundedSender<QueueEvent>,
 ) -> QueueHandle {
+    spawn_with(DeviceOpener, settings, staging_dir, history, events)
+}
+
+/// [`spawn`] with another way to reach the phone.
+pub fn spawn_with<O: Opener>(
+    opener: O,
+    settings: Settings,
+    staging_dir: PathBuf,
+    history: Option<History>,
+    events: UnboundedSender<QueueEvent>,
+) -> QueueHandle {
     let (tx, rx) = mpsc::unbounded_channel();
     let manager = Manager {
+        opener: Arc::new(opener),
+        reserved: HashMap::new(),
         settings,
         staging_dir,
         history,
@@ -185,13 +222,17 @@ struct Job {
     overwrite: bool,
 }
 
-struct Done {
+struct Done<M> {
     id: JobId,
     result: Result<bool, JobError>,
-    conn: Option<(String, MediaFs)>,
+    conn: Option<(String, M)>,
 }
 
-struct Manager {
+struct Manager<O: Opener> {
+    opener: Arc<O>,
+    /// Destinations of unfinished jobs, so two items never get the same file
+    /// (audit REL-01/02).
+    reserved: HashMap<PathBuf, JobId>,
     settings: Settings,
     staging_dir: PathBuf,
     history: Option<History>,
@@ -204,16 +245,16 @@ struct Manager {
     /// "Do this for all": answer for further conflicts until the queue idles.
     conflict_default: Option<bool>,
     /// Idle AFC connections, reused by the next job for the same phone.
-    conns: Vec<(String, MediaFs)>,
+    conns: Vec<(String, O::Media)>,
     user_paused: bool,
     device_paused: Option<String>,
     ready_udid: Option<String>,
     next_id: JobId,
 }
 
-impl Manager {
+impl<O: Opener> Manager<O> {
     async fn run(mut self, mut rx: UnboundedReceiver<QueueCommand>) {
-        let (done_tx, mut done_rx) = mpsc::unbounded_channel::<Done>();
+        let (done_tx, mut done_rx) = mpsc::unbounded_channel::<Done<O::Media>>();
         loop {
             self.dispatch(&done_tx);
             self.show_conflict();
@@ -237,6 +278,9 @@ impl Manager {
     fn set_state(&mut self, id: JobId, state: JobState) {
         if let Some(j) = self.jobs.get_mut(&id) {
             j.state = state.clone();
+            if state.is_finished() && self.reserved.get(&j.dest) == Some(&id) {
+                self.reserved.remove(&j.dest);
+            }
         }
         self.emit(QueueEvent::State { id, state });
     }
@@ -339,10 +383,18 @@ impl Manager {
             }
             let id = self.next_id;
             self.next_id += 1;
-            let dest = dest_path(&self.settings, &asset);
+            let reserved = &self.reserved;
+            let dest = resolve_dest(&self.settings, &asset, |p| reserved.contains_key(p))
+                .path()
+                .to_path_buf();
+            self.reserved.insert(dest.clone(), id);
+            let name = dest
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| output_name(&asset));
             self.emit(QueueEvent::Added {
                 id,
-                name: output_name(&asset),
+                name,
                 source: asset.device_path(),
                 dest: dest.clone(),
             });
@@ -394,7 +446,7 @@ impl Manager {
     }
 
     /// Starts jobs while there is a free worker and nothing is paused.
-    fn dispatch(&mut self, done_tx: &UnboundedSender<Done>) {
+    fn dispatch(&mut self, done_tx: &UnboundedSender<Done<O::Media>>) {
         while self.running.len() < WORKERS && self.pause_reason().is_none() {
             let Some(id) = self.pending.pop_front() else {
                 break;
@@ -411,8 +463,27 @@ impl Manager {
                 break;
             }
 
-            // Conflicts come from what is really in the destination (PLAN §7.5).
-            if !job.overwrite && job.dest.exists() {
+            // Look again: files may have come or gone since the job was added.
+            // Only this item's own earlier copy is a conflict (PLAN §7.5);
+            // anything else there makes it pick the next free name.
+            let reserved = &self.reserved;
+            let target = resolve_dest(&job.settings, &job.asset, |p| {
+                reserved.get(p).is_some_and(|other| *other != id)
+            });
+            if target.path() != job.dest {
+                if self.reserved.get(&job.dest) == Some(&id) {
+                    self.reserved.remove(&job.dest);
+                }
+                job.dest = target.path().to_path_buf();
+                let _ = self.events.send(QueueEvent::Retarget {
+                    id,
+                    dest: job.dest.clone(),
+                });
+            }
+            self.reserved.insert(job.dest.clone(), id);
+            if matches!(target, Target::Free(_)) {
+                job.overwrite = false;
+            } else if !job.overwrite {
                 let policy = match (self.conflict_default, job.settings.on_conflict) {
                     (Some(true), _) | (None, ConflictPolicy::Overwrite) => {
                         ConflictPolicy::Overwrite
@@ -438,6 +509,7 @@ impl Manager {
                 id,
                 asset: job.asset.clone(),
                 dest: job.dest.clone(),
+                overwrite: job.overwrite,
                 settings: job.settings.clone(),
                 staging_dir: self.staging_dir.clone(),
             };
@@ -449,10 +521,11 @@ impl Manager {
                 .map(|i| self.conns.swap_remove(i).1);
             self.running.insert(id);
             let (events, done_tx) = (self.events.clone(), done_tx.clone());
+            let opener = self.opener.clone();
             tokio::spawn(async move {
                 let mut fs = match conn {
                     Some(fs) => fs,
-                    None => match open_media(&udid).await {
+                    None => match opener.open(&udid).await {
                         Ok(fs) => fs,
                         Err(e) => {
                             let result = Err(if e.is_connection_problem() {
@@ -480,7 +553,7 @@ impl Manager {
         }
     }
 
-    fn finished(&mut self, done: Done) {
+    fn finished(&mut self, done: Done<O::Media>) {
         self.running.remove(&done.id);
         if let Some(conn) = done.conn {
             self.conns.push(conn);
@@ -556,7 +629,12 @@ impl Manager {
                 .pending
                 .iter()
                 .filter_map(|p| self.jobs.get(p))
-                .filter(|j| !j.overwrite && j.dest.exists())
+                .filter(|j| {
+                    !j.overwrite
+                        && std::fs::metadata(&j.dest)
+                            .and_then(|m| m.modified())
+                            .is_ok_and(|t| crate::layout::is_copy_of(t, &j.asset))
+                })
                 .count();
         self.emit(QueueEvent::Conflict {
             id,
@@ -568,8 +646,4 @@ impl Manager {
             others,
         });
     }
-}
-
-async fn open_media(udid: &str) -> Result<MediaFs, DeviceError> {
-    Session::open(udid).await?.media().await
 }

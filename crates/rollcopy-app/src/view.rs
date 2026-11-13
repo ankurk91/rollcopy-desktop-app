@@ -192,9 +192,9 @@ pub struct MainView {
     pub(crate) transfers: Transfers,
     /// Copy of the saved preferences, refreshed when they change.
     pub(crate) config: crate::config::Config,
-    /// Whether an item's output file already exists in the destination
-    /// (the ✓ badge), by device path. Filled for on-screen tiles.
-    pub(crate) in_dest: HashMap<String, bool>,
+    /// Where an item's copy is in the destination (the ✓ badge), by device
+    /// path; `None` if it isn't copied. Filled for on-screen tiles.
+    pub(crate) in_dest: HashMap<String, Option<PathBuf>>,
     /// Preview pane shown; opens when an item is selected, × closes it.
     pub(crate) preview_open: bool,
     /// "Copies are still running" prompt on window close.
@@ -421,11 +421,12 @@ impl MainView {
             }
             let key = a.device_path();
             let copied = match (self.in_dest.get(&key), &settings) {
-                (Some(&c), _) => c,
+                (Some(c), _) => c.is_some(),
                 (None, Some(s)) => {
-                    let c = rollcopy_queue::dest_path(s, a).exists();
+                    let c = rollcopy_queue::find_copy(s, a);
+                    let copied = c.is_some();
                     self.in_dest.insert(key, c);
-                    c
+                    copied
                 }
                 (None, None) => false,
             };
@@ -435,6 +436,11 @@ impl MainView {
         self.filter_counts = counts;
         self.sync_counts = sync;
         self.counts_dirty = false;
+    }
+
+    /// Whether the item with this device path is known to be copied.
+    pub(crate) fn is_copied(&self, key: &str) -> bool {
+        matches!(self.in_dest.get(key), Some(Some(_)))
     }
 
     pub(crate) fn recompute_visible(&mut self) {
@@ -447,7 +453,7 @@ impl MainView {
             .filter(|(_, a)| {
                 LibraryTree::contains(sel, a)
                     && filter.matches(a)
-                    && sync.matches(self.in_dest.get(&a.device_path()) == Some(&true))
+                    && sync.matches(self.is_copied(&a.device_path()))
             })
             .map(|(i, _)| i)
             .collect();

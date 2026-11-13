@@ -11,6 +11,6 @@ mod session;
 mod watch;
 
 pub use error::{DeviceError, Result};
-pub use media::{EntryKind, MediaFs, Stat};
+pub use media::{EntryKind, MediaFs, MediaRead, Stat};
 pub use session::{DeviceInfo, DeviceRef, Session, list_devices, pair};
 pub use watch::{NoDeviceHint, Phase, apple_usb_present, usbmuxd_installed, watch};

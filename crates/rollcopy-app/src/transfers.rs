@@ -261,7 +261,8 @@ impl MainView {
                 if let Some(&i) = t.index.get(&id) {
                     let row = &mut t.rows[i];
                     if matches!(state, JobState::Done | JobState::Overwritten) {
-                        self.in_dest.insert(row.source.clone(), true);
+                        self.in_dest
+                            .insert(row.source.clone(), Some(row.dest.clone()));
                         self.counts_dirty = true;
                     }
                     if !matches!(state, JobState::Reading) {
@@ -274,6 +275,15 @@ impl MainView {
             QueueEvent::Progress { id, done, total } => {
                 if let Some(&i) = t.index.get(&id) {
                     t.rows[i].progress = Some((done, total));
+                }
+            }
+            QueueEvent::Retarget { id, dest } => {
+                if let Some(&i) = t.index.get(&id) {
+                    let row = &mut t.rows[i];
+                    if let Some(name) = dest.file_name() {
+                        row.name = name.to_string_lossy().into_owned();
+                    }
+                    row.dest = dest;
                 }
             }
             QueueEvent::Paused { reason } => t.paused = reason,

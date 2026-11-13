@@ -27,6 +27,36 @@ pub struct Stat {
     pub modified: SystemTime,
 }
 
+/// The two read calls a copy job needs, so the queue can be tested against a
+/// fake phone (audit MNT-05). Read-only like [`MediaFs`]: there is nothing
+/// here that could change the device.
+pub trait MediaRead: Send {
+    fn stat(&mut self, path: &str) -> impl Future<Output = Result<Stat>> + Send;
+
+    /// Streams a device file to `dest`; see [`MediaFs::copy_to_local`].
+    fn copy_to_local(
+        &mut self,
+        path: &str,
+        dest: &Path,
+        progress: impl FnMut(u64) + Send,
+    ) -> impl Future<Output = Result<u64>> + Send;
+}
+
+impl MediaRead for MediaFs {
+    async fn stat(&mut self, path: &str) -> Result<Stat> {
+        MediaFs::stat(self, path).await
+    }
+
+    async fn copy_to_local(
+        &mut self,
+        path: &str,
+        dest: &Path,
+        progress: impl FnMut(u64) + Send,
+    ) -> Result<u64> {
+        MediaFs::copy_to_local(self, path, dest, progress).await
+    }
+}
+
 /// Read-only view of the phone's media filesystem over AFC.
 ///
 /// This is the only file access the rest of Rollcopy gets (PLAN §2a). It can

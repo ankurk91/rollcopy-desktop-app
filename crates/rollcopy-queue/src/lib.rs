@@ -10,5 +10,11 @@ mod layout;
 mod queue;
 
 pub use history::{FailureRecord, History};
-pub use layout::{ConflictPolicy, Layout, Settings, dest_path, dest_path_in, output_name};
-pub use queue::{JobId, JobState, QueueCommand, QueueEvent, QueueHandle, Stage, spawn};
+pub use layout::{
+    ConflictPolicy, Layout, Settings, Target, dest_path, dest_path_in, find_copy, is_copy_of,
+    output_name, resolve_dest,
+};
+pub use queue::{
+    DeviceOpener, JobId, JobState, Opener, QueueCommand, QueueEvent, QueueHandle, Stage, spawn,
+    spawn_with,
+};

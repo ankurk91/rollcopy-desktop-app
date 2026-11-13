@@ -233,8 +233,9 @@ These are the rules proven in the manual transfer, turned into code.
    - **iPhone videos are HDR** (checked 2026-11-12): HEVC Main 10, HLG (`arib-std-b67`), BT.2020, Dolby Vision profile 8.4. Celluloid (mpv) on this laptop played one in **black and white**, while ffmpeg decodes it in full colour. A lossless remux keeps the HDR. **Decided 2026-11-12: Lossless stays the default.** The MP4 is correct: it decodes in colour with ffmpeg (software and VA-API), VLC, Android and iPhone; only Celluloid shows it in black and white. The user plays videos in VLC. The H.264 option stays as a preference (M5) for old devices. It's slow in software (about 1 min per 20 s clip because of the float tone-map); **use VA-API (`tonemap_vaapi` + `h264_vaapi`) on the Intel Arc** before offering it in Preferences. Try dropping the Dolby Vision metadata and keeping only the HLG layer. The H.264 option should also tone-map to SDR: `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p` gave correct colours.
    - Live Photos → **still only, always.** The motion clip is never copied. There's no setting for it.
 3. **Arrange the destination** as `<dest>/<YYYY>/<MM>/images|videos/<IMG_xxxx>.<ext>`, using the capture date in its own time zone. `<dest>` defaults to `~/Pictures/Rollcopy/<device name>/`. A flat-folder layout is available as a preference.
-4. **Write safely:** write to `<name>.part`, check it (size for straight copies; decodes for converted files), then rename. Set the file's modified time to the capture date. On overwrite, the old file is only replaced at the final rename, so a failed copy never destroys it.
-5. **If the file already exists** at the destination path, show a dialog:
+4. **Write safely:** write to a hidden `.rollcopy-<pid>-<n>-<name>.part` beside the destination (unique per job, so two jobs never share one), check it (size for straight copies; decodes for converted files), then rename. Set the file's modified time to the capture date. On overwrite, the old file is only replaced at the final rename, so a failed copy never destroys it. Without overwrite the rename is no-clobber (`renameat2` NOREPLACE, or link + unlink), and the folder is fsynced afterwards.
+5. **Same name, different photo** (audit REL-01, fixed 2026-11-13). iOS reuses `IMG_0001`–`IMG_9999` across `DCIM/1xxAPPLE` folders, so two items can map to one path. A file counts as an item's copy only when its modified time is the item's capture time (Rollcopy always sets it; 2 s and whole-quarter-hour slack for FAT). Any other file there is left alone, and the item goes to `IMG_0057 (2).JPG`, `(3)`, … Queued items reserve their path, and the path is re-checked when the job starts. Undated items can't be told apart, so any file at their path counts as theirs.
+6. **If this item's copy already exists**, show a dialog:
 
    ```
    ┌──────────────────────────────────────────────────────────┐
@@ -248,8 +249,8 @@ These are the rules proven in the manual transfer, turned into code.
 
    - The queue pauses on that item until you answer. Other non-conflicting items keep copying.
    - Preference "When a file already exists": **Ask** (default) / Always skip / Always overwrite.
-   - There's no per-device "copied" database. ✓ badges and conflicts come from what's actually in the destination folder, so they stay correct if you move or delete files there.
-6. **Concurrency:** 2 AFC reads at once, plus 1–2 conversion workers. Never more than 1 ffmpeg per CPU core.
+   - There's no per-device "copied" database. ✓ badges and conflicts come from what's actually in the destination folder (the file and its modified time), so they stay correct if you move or delete files there. A copy whose modified time was changed by another program counts as not copied, and copying again makes a `(2)` file next to it rather than replacing it.
+7. **Concurrency:** 2 AFC reads at once, plus 1–2 conversion workers. Never more than 1 ffmpeg per CPU core.
 
 ## 8. Error tracking
 
