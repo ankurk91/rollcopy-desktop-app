@@ -124,6 +124,9 @@ packaging/install-local.sh --uninstall
   a hub. Many cheap cables only charge.
 - **"Unlock your iPhone and tap Trust" doesn't go away:** unplug, unlock the phone, plug in again and
   tap **Trust**. If you tapped **Don't Trust**, unplugging and plugging in asks again.
+- **Videos don't play (fresh Ubuntu):** Ubuntu's video player can't decode iPhone (HEVC) or app
+  (H.264) videos until its codecs are installed: `sudo apt install gstreamer1.0-libav`, or install
+  VLC. Rollcopy says so when you *Open* a video and the codecs are missing. The copied files are fine.
 - **Videos play in black and white:** iPhone videos are HDR (HLG / Dolby Vision). Some Linux players,
   such as Celluloid/mpv on some setups, show these in black and white. The file is fine; VLC,
   Android and iPhone play it in colour. To get standard-colour H.264 files, choose

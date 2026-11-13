@@ -106,7 +106,18 @@ impl MainView {
             Event::ThumbMissing { key } => {
                 self.thumbs.insert(key, Thumb::Missing);
             }
-            Event::Opened { name } => self.status = Some(format!("Opened {name}")),
+            Event::Opened { name, app, hint } => {
+                let mut s = match app {
+                    Some(app) => format!("Opened {name} in {app}"),
+                    None => format!("Opened {name}"),
+                };
+                if let Some(hint) = hint {
+                    crate::applog!("open: player may lack video decoders");
+                    s.push_str(". If it doesn't play: ");
+                    s.push_str(&hint);
+                }
+                self.status = Some(s);
+            }
             Event::OpenFailed { name, error } => {
                 self.status = Some(format!("Couldn't open {name}: {error}"))
             }

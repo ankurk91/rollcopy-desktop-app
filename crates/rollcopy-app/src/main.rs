@@ -14,6 +14,7 @@ mod list;
 mod log;
 mod notify;
 mod paths;
+mod players;
 mod prefs;
 mod prefs_window;
 mod preview;

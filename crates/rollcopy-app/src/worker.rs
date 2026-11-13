@@ -27,6 +27,10 @@ pub enum Event {
     /// "Open" finished copying and handed the file to the system viewer.
     Opened {
         name: String,
+        /// The app it went to ("Videos"), if known.
+        app: Option<String>,
+        /// Why it may not play (missing decoders), if so.
+        hint: Option<String>,
     },
     OpenFailed {
         name: String,
@@ -447,7 +451,7 @@ async fn serve_commands(
                         let mut own = None;
                         let ev = match open_file(&mut own, &udid, &device_path, &name, &paths).await
                         {
-                            Ok(()) => Event::Opened { name },
+                            Ok((app, hint)) => Event::Opened { name, app, hint },
                             Err(e) => Event::OpenFailed {
                                 name,
                                 error: e.to_string(),
@@ -617,7 +621,18 @@ async fn open_file(
     device_path: &str,
     name: &str,
     paths: &CachePaths,
-) -> Result<(), DeviceError> {
+) -> Result<(Option<String>, Option<String>), DeviceError> {
+    // Find out first whether anything can open it (no point copying a
+    // large video otherwise), and whether it can likely play it.
+    let file_name = name.to_owned();
+    let check = tokio::task::spawn_blocking(move || crate::players::check(&file_name))
+        .await
+        .map_err(|e| DeviceError::Other(e.to_string()))?;
+    let (app, hint) = match check {
+        crate::players::Check::NoApp { error } => return Err(DeviceError::Other(error)),
+        crate::players::Check::Fine { app } => (app, None),
+        crate::players::Check::MayNotPlay { app, hint } => (app, Some(hint)),
+    };
     let dir = paths.open_dir();
     tokio::fs::create_dir_all(&dir).await?;
     let dest = dir.join(name);
@@ -636,5 +651,5 @@ async fn open_file(
     if !status.success() {
         return Err(DeviceError::Other(format!("xdg-open exited with {status}")));
     }
-    Ok(())
+    Ok((app, hint))
 }
