@@ -5614,7 +5614,7 @@ dependencies = [
 
 [[package]]
 name = "rollcopy-app"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-channel",
  "chrono",
@@ -5639,7 +5639,7 @@ dependencies = [
 
 [[package]]
 name = "rollcopy-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "rollcopy-convert",
  "rollcopy-device",
@@ -5650,7 +5650,7 @@ dependencies = [
 
 [[package]]
 name = "rollcopy-convert"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "image",
  "libheif-rs",
@@ -5660,7 +5660,7 @@ dependencies = [
 
 [[package]]
 name = "rollcopy-device"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "idevice",
@@ -5672,7 +5672,7 @@ dependencies = [
 
 [[package]]
 name = "rollcopy-library"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "plist",
@@ -5685,7 +5685,7 @@ dependencies = [
 
 [[package]]
 name = "rollcopy-queue"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "rollcopy-convert",

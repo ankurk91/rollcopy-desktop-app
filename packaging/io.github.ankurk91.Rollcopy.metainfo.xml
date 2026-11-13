@@ -49,6 +49,12 @@
   </keywords>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.3.1" date="2026-11-13">
+      <description>
+        <p>Title bar and window buttons on GNOME (Wayland), such as Ubuntu; toolbar buttons
+        no longer pushed out of view in narrow windows.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-11-13"/>
     <release version="0.2.0" date="2026-11-13"/>
     <release version="0.1.0" date="2026-11-12"/>
