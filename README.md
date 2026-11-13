@@ -11,26 +11,34 @@ Plug in the phone, tap **Trust**, pick what you want, and Rollcopy copies it to
 `~/Pictures/Rollcopy/<phone name>/YYYY/MM/images|videos/`, converting HEIC to JPG and MOV to MP4
 on the way.
 
-![Rollcopy on Linux Mint: an iPhone photo library by year and month, a thumbnail grid with Live, edited and video badges, the preview pane with camera details, and the transfer queue](.github/screenshot.png)
+![Rollcopy on Linux Mint: an iPhone photo library by year and month with Hidden and Recently Deleted, a thumbnail grid with copied badges and filters, the preview pane with photo details, and the transfer queue](.github/screenshot.jpg)
 
-> **Status:** early (0.1.0). Linux only, tested on Linux Mint 22 (Cinnamon, X11) with iOS 27.
+> **Status:** early (0.2.0). Linux only, tested on Linux Mint 22 (Cinnamon, X11) with iOS 27.
 
 ## Features
 
 - **Browse the Photos library**: thumbnails by year and month, filters (photos, videos, edited,
-  copied / not copied), sort by date taken, keyboard navigation.
+  copied / not copied), sort by date taken, keyboard navigation, and a full-window viewer
+  (Space). New photos taken while the phone is plugged in appear with **Reload** (F5).
+- **Private by default**: the Hidden album (locked by Face ID on the phone) and Recently Deleted
+  aren't shown or copied unless you turn them on in Preferences, and then only under their own
+  entries, never in "All media".
 - **Details for each item**: date and time zone, size, camera and lens, the app that saved it
   (Camera, WhatsApp, Snapchat, …), place name, location, albums.
 - **Android/PC-friendly copies**:
   - HEIC → JPG (keeps colour profile and EXIF, applies rotation)
   - MOV → MP4 (lossless by default; optional H.264 re-encode for old devices)
   - Edited photos and videos are copied as edited; Live Photos as the still.
-- **Safe copying**: files are written to a temporary `.part` file, checked, then renamed, so a failed
-  copy never damages an existing file. Already-copied items are detected from what's in the folder.
-  You choose Ask / Skip / Overwrite for files that already exist.
-- **Transfer queue** with progress, pause/resume, retry and an exportable error report. Unplugging
-  or locking the phone pauses the queue instead of failing items.
-- **Tray icon and notifications**: closing the window during a copy keeps Rollcopy running in the tray.
+- **Safe copying**: files are written to a temporary file, checked, then renamed, so a failed copy
+  never damages an existing file. Already-copied items are recognised in the folder by name and
+  capture time. iPhones reuse names like `IMG_0057` after 9,999 photos; a different photo with the
+  same name is saved as `IMG_0057 (2).JPG`, never over another file. For an item copied before, you
+  choose Ask / Skip / Overwrite.
+- **Transfer queue** with progress, pause/resume, cancel, retry and an exportable error report.
+  Unplugging or locking the phone pauses the queue instead of failing items, and it carries on when
+  the phone is back. A full disk pauses it too.
+- **Tray icon and notifications**: closing the window during a copy keeps Rollcopy running in the tray;
+  starting Rollcopy again brings the window back.
 - **Preferences** for the destination, folder layout, JPEG quality, video format and theme.
 
 ### Your phone is safe
@@ -65,14 +73,14 @@ Download the latest `.deb` or `.AppImage` from
 **.deb** (installs `usbmuxd` and `ffmpeg` if needed):
 
 ```sh
-sudo apt install ./rollcopy_0.1.0-1_amd64.deb
+sudo apt install ./rollcopy_0.2.0-1_amd64.deb
 ```
 
 **AppImage** (install `usbmuxd` and `ffmpeg` first, see Requirements):
 
 ```sh
-chmod +x Rollcopy-0.1.0-x86_64.AppImage
-./Rollcopy-0.1.0-x86_64.AppImage
+chmod +x Rollcopy-0.2.0-x86_64.AppImage
+./Rollcopy-0.2.0-x86_64.AppImage
 ```
 
 **From source** for your user only (see [Building from source](#building-from-source)):
@@ -88,7 +96,8 @@ packaging/install-local.sh --uninstall
 2. Tap **Trust** on the phone and enter your passcode when asked.
 3. Pick items (click, Ctrl/Shift+click, Ctrl+A, arrow keys) and press **Copy selected**, or
    **Copy all** for the year or month you're viewing.
-4. Change where files go with **Save to** (📁) or in **Preferences** (Ctrl+,).
+4. Change where files go with **Save to** (📁) or in **Preferences** (⚙ or Ctrl+,).
+5. Took new photos while plugged in? Press **↻** next to the phone's name (or F5).
 
 | Key | Action |
 |---|---|
@@ -110,11 +119,13 @@ packaging/install-local.sh --uninstall
 - **Videos play in black and white:** iPhone videos are HDR (HLG / Dolby Vision). Some Linux players,
   such as Celluloid/mpv on some setups, show these in black and white. The file is fine; VLC,
   Android and iPhone play it in colour. To get standard-colour H.264 files, choose
-  *Preferences → Conversion → Videos → Re-encode to H.264* (much slower).
-- **Something failed:** the transfer panel shows the reason. *Export error report* saves a CSV;
-  *☰ → About → Credits → Copy debug info* copies version and system details for a bug report.
+  *Preferences → Conversion → Videos → H.264 (slower)*.
+- **Something failed:** the transfer panel shows the reason. *Export error report* saves a CSV, and
+  `~/.local/state/rollcopy/rollcopy.log` has the app's log.
 
-Please report problems at [Issues](https://github.com/ankurk91/rollcopy-desktop-app/issues).
+Please report problems with *☰ → Report an Issue*: it opens a GitHub issue form with the version,
+Linux version and phone model filled in (never the phone's name or serial). Or use
+[Issues](https://github.com/ankurk91/rollcopy-desktop-app/issues) directly.
 
 ## FAQ
 
