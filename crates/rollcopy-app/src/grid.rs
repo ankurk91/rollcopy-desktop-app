@@ -23,6 +23,8 @@ const GAP: f32 = 8.;
 const PAD: f32 = 16.;
 /// Room for the scrollbar so the last column never sits under it.
 const SCROLLBAR: f32 = 14.;
+const LIST_ROW_H: f32 = 32.;
+const LIST_PAD: f32 = 8.;
 
 impl MainView {
     /// Tiles per row for the current window width.
@@ -50,6 +52,8 @@ impl MainView {
             self.recount();
         }
         let (cols, tile) = self.grid_layout(window);
+        // The list is one item per row; arrow keys move by one either way.
+        let cols = if self.list_view { 1 } else { cols };
         self.cols = cols;
         self.tile = tile;
         let rows = self.visible.len().div_ceil(cols);
@@ -57,6 +61,35 @@ impl MainView {
         let header = self.render_grid_header(cx).into_any_element();
         let body = if self.visible.is_empty() {
             self.render_empty(cx)
+        } else if self.list_view {
+            // No thumbnails: fast, and nothing on screen to see (privacy).
+            v_flex()
+                .flex_1()
+                .min_h_0()
+                .child(self.render_list_header(cx))
+                .child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_h_0()
+                        .child(
+                            uniform_list(
+                                "list",
+                                self.visible.len(),
+                                cx.processor(move |this, range: Range<usize>, _window, cx| {
+                                    range
+                                        .map(|pos| this.render_list_row(pos, cx))
+                                        .collect::<Vec<_>>()
+                                }),
+                            )
+                            .track_scroll(&self.grid_scroll)
+                            .size_full()
+                            .px(px(PAD))
+                            .pb(px(PAD)),
+                        )
+                        .vertical_scrollbar(&self.grid_scroll),
+                )
+                .into_any_element()
         } else {
             div()
                 .relative()
@@ -227,6 +260,33 @@ impl MainView {
                     })
                     .child(div().flex_1())
                     .child(
+                        h_flex()
+                            .child(
+                                btn("view-grid")
+                                    .small()
+                                    .icon(IconName::LayoutGrid)
+                                    .tooltip("Grid")
+                                    .when(!self.list_view, |b| b.primary())
+                                    .when(self.list_view, |b| b.ghost())
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.set_list_view(false, cx);
+                                        window.focus(&this.focus, cx);
+                                    })),
+                            )
+                            .child(
+                                btn("view-list")
+                                    .small()
+                                    .icon(IconName::List)
+                                    .tooltip("List (no thumbnails)")
+                                    .when(self.list_view, |b| b.primary())
+                                    .when(!self.list_view, |b| b.ghost())
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.set_list_view(true, cx);
+                                        window.focus(&this.focus, cx);
+                                    })),
+                            ),
+                    )
+                    .child(
                         btn("sort")
                             .small()
                             .ghost()
@@ -292,13 +352,17 @@ impl MainView {
                 continue;
             }
             let dest = self.paths.thumb(&udid, a);
-            if dest.exists() {
-                self.thumbs.insert(key, Thumb::Ready(dest));
+            // Hidden-album items are shown from a blurred copy first.
+            let veil = a.hidden.then(|| self.paths.veil(&udid, a));
+            let shown = veil.as_ref().unwrap_or(&dest);
+            if shown.exists() {
+                self.thumbs.insert(key, Thumb::Ready(shown.clone()));
             } else {
                 wanted.push(ThumbReq {
                     key: key.clone(),
                     source: phone_thumb_path(a),
                     dest,
+                    veil,
                 });
                 self.thumbs.insert(key, Thumb::Pending);
             }
@@ -330,12 +394,13 @@ impl MainView {
         let selected = self.selected.contains(&key);
         let focused = self.focused == Some(idx);
 
-        let image = match self.thumbs.get(&key) {
-            Some(Thumb::Ready(path)) => img(path.clone())
+        let veiled = self.veiled(a);
+        let image = match (self.thumbs.get(&key), self.thumb_for(a)) {
+            (Some(Thumb::Ready(_)), Some(path)) => img(path)
                 .size_full()
                 .object_fit(ObjectFit::Cover)
                 .into_any_element(),
-            Some(Thumb::Missing) => div()
+            (Some(Thumb::Missing), _) => div()
                 .size_full()
                 .flex()
                 .items_center()
@@ -381,6 +446,28 @@ impl MainView {
             })
             .when(a.trashed, |d| d.opacity(0.4))
             .child(image)
+            .when(veiled, |d| {
+                let key = key.clone();
+                d.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            btn(("reveal", pos))
+                                .small()
+                                .icon(IconName::Eye)
+                                .tooltip("Hidden album: click to show")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.set_revealed(key.clone(), true);
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                })),
+                        ),
+                )
+            })
             .when(a.kind == MediaKind::Video, |d| {
                 let label = match a.duration_secs {
                     Some(s) => format!("▶ {}:{:02}", s as u64 / 60, s as u64 % 60),
@@ -439,6 +526,157 @@ impl MainView {
                         .child("✓"),
                 )
             })
+            .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                this.click_tile(pos, ev.modifiers(), ev.click_count());
+                window.focus(&this.focus, cx);
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+
+    /// Switches between the grid and the list, keeping the focused item in
+    /// view, and remembers the choice.
+    fn set_list_view(&mut self, list: bool, cx: &mut Context<Self>) {
+        if self.list_view == list {
+            return;
+        }
+        self.list_view = list;
+        crate::prefs::Prefs::update_ui(cx, |ui| ui.list_view = list);
+        if let Some(pos) = self
+            .focused
+            .and_then(|i| self.visible.iter().position(|&v| v == i))
+        {
+            let cols = if list { 1 } else { self.cols.max(1) };
+            self.grid_scroll
+                .scroll_to_item(pos / cols, ScrollStrategy::Center);
+        }
+        cx.notify();
+    }
+
+    fn render_list_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        h_flex()
+            .px(px(PAD + LIST_PAD))
+            .pb_1()
+            .gap_3()
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .child(div().w(px(36.)))
+            .child(div().flex_1().min_w(px(120.)).child("Name"))
+            .child(div().w(px(150.)).child("Taken"))
+            .child(div().w(px(110.)).child("Size"))
+            .child(div().w(px(70.)).child("File"))
+            .child(div().w(px(110.)))
+            .child(div().w(px(20.)))
+    }
+
+    fn render_list_row(&self, pos: usize, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let idx = self.visible[pos];
+        let a = &self.assets()[idx];
+        let key = a.device_path();
+        let selected = self.selected.contains(&key);
+        let focused = self.focused == Some(idx);
+        let taken = a
+            .captured_local()
+            .map(|d| d.format("%-d %b %Y %H:%M").to_string())
+            .unwrap_or_else(|| "Undated".into());
+        let size = match (a.width, a.height, a.kind, a.duration_secs) {
+            (_, _, MediaKind::Video, Some(s)) => {
+                format!("▶ {}:{:02}", s as u64 / 60, s as u64 % 60)
+            }
+            (Some(w), Some(h), _, _) => format!("{w} × {h}"),
+            _ => String::new(),
+        };
+        let file = a
+            .original_size
+            .map(crate::transfers::human_size)
+            .unwrap_or_default();
+        let mut tags = Vec::new();
+        if a.live_photo {
+            tags.push("Live");
+        }
+        if a.is_edited() {
+            tags.push("Edited");
+        }
+        if a.hidden {
+            tags.push("Hidden");
+        }
+        h_flex()
+            .id(("row", pos))
+            .h(px(LIST_ROW_H))
+            .px(px(LIST_PAD))
+            .gap_3()
+            .items_center()
+            .rounded_md()
+            .text_sm()
+            .cursor_pointer()
+            .border_1()
+            .border_color(if focused {
+                theme.ring
+            } else {
+                transparent_black()
+            })
+            .when(selected, |d| d.bg(theme.accent))
+            .when(!selected, |d| d.hover(|s| s.bg(theme.muted)))
+            .when(a.trashed, |d| d.text_color(theme.muted_foreground))
+            .child(
+                h_flex()
+                    .w(px(36.))
+                    .gap_1()
+                    .child(
+                        div()
+                            .w(px(14.))
+                            .text_color(theme.primary)
+                            .child(if selected { "✓" } else { "" }),
+                    )
+                    .child(
+                        Icon::new(if a.kind == MediaKind::Video {
+                            IconName::Video
+                        } else {
+                            IconName::Image
+                        })
+                        .small()
+                        .text_color(theme.muted_foreground),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(120.))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(a.filename.clone()),
+            )
+            .child(div().w(px(150.)).child(taken))
+            .child(
+                div()
+                    .w(px(110.))
+                    .text_color(theme.muted_foreground)
+                    .child(size),
+            )
+            .child(
+                div()
+                    .w(px(70.))
+                    .text_color(theme.muted_foreground)
+                    .child(file),
+            )
+            .child(
+                div()
+                    .w(px(110.))
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(tags.join(" · ")),
+            )
+            .child(div().w(px(20.)).when(self.is_copied(&key), |d| {
+                d.child(Icon::new(IconName::RefreshCw).small().text_color(hsla(
+                    96. / 360.,
+                    0.62,
+                    0.55,
+                    1.,
+                )))
+            }))
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                 this.click_tile(pos, ev.modifiers(), ev.click_count());
                 window.focus(&this.focus, cx);

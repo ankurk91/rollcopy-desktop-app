@@ -19,10 +19,12 @@ on the way.
 
 - **Browse the Photos library**: thumbnails by year and month, filters (photos, videos, edited,
   copied / not copied), sort by date taken, keyboard navigation, and a full-window viewer
-  (Space). New photos taken while the phone is plugged in appear with **Reload** (F5).
+  (Space). A **list view** shows names, dates and sizes without any thumbnails: quicker, and
+  nothing on screen for people looking over your shoulder. New photos taken while the phone is plugged in appear with **Reload** (F5).
 - **Private by default**: the Hidden album (locked by Face ID on the phone) and Recently Deleted
   aren't shown or copied unless you turn them on in Preferences, and then only under their own
-  entries, never in "All media".
+  entries, never in "All media". Even then, Hidden items stay blurred until you click the 👁 on
+  each one.
 - **Details for each item**: date and time zone, size, camera and lens, the app that saved it
   (Camera, WhatsApp, Snapchat, …), place name, location, albums.
 - **Android/PC-friendly copies**:

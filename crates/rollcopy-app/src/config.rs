@@ -210,6 +210,8 @@ pub struct UiState {
     pub window: Option<SavedBounds>,
     pub preview_width: f32,
     pub transfers_expanded: bool,
+    /// The library is shown as a list (no thumbnails) instead of a grid.
+    pub list_view: bool,
     /// Unix seconds of the last update check (for the once-a-day limit).
     pub last_update_check: Option<i64>,
 }
@@ -220,6 +222,7 @@ impl Default for UiState {
             window: None,
             preview_width: 300.,
             transfers_expanded: true,
+            list_view: false,
             last_update_check: None,
         }
     }

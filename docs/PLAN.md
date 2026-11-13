@@ -181,6 +181,7 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 - The library tree is grouped **year → month** by capture date. An "On-phone folders" view (`100APPLE`, …) is available as an advanced toggle.
 - Recently Deleted is listed with its count but greyed out, and excluded from "copy folder". It's off by default (Preferences → Library).
 - **Hidden album** (audit SEC-01, 2026-11-13): iOS locks it behind Face ID or the passcode, so its items are left out of the tree, the grid, the counts and every copy action, and their cached thumbnails are deleted. Preferences → Library → *Show Hidden album* lists them under their own **Hidden** node, never inside All media, so "Copy all" never includes them.
+- **Blurred Hidden items and list view** (2026-11-13, at the user's request). With *Show Hidden album* on, Hidden items show a tiny, blurred copy of their thumbnail (`<thumb>.veil.jpg`, 48 px) with an 👁 button. Clicking it reveals that item until quit, until it's blurred again from the preview pane, or until the preference is turned off. No full-size image is fetched while an item is blurred. A grid/list toggle in the header switches to a list without thumbnails (name, date, size, file size, tags, copied mark); no thumbnails are requested in list mode. The choice is saved in `ui.toml`.
 
 **Centre pane: thumbnail grid**
 - Filter chips: All / Photos / Videos / Edited, plus Copied / Not copied (click the active one again to turn it off). Copied state comes from the destination folder, as for the badges.

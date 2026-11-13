@@ -174,6 +174,11 @@ pub struct MainView {
     pub(crate) viewer_open: bool,
     /// Full-size photos for the viewer, by device path.
     pub(crate) full: HashMap<String, crate::viewer::Full>,
+    /// Hidden-album items the user chose to see this session, by device
+    /// path. Others show blurred.
+    pub(crate) revealed: HashSet<String>,
+    /// List view (no thumbnails) instead of the grid.
+    pub(crate) list_view: bool,
     /// Copy settings the copied state in `in_dest` was worked out for.
     pub(crate) copied_for: Option<rollcopy_queue::Settings>,
     /// Bumped per copied-state scan; older scans' results are dropped.
@@ -314,6 +319,8 @@ impl MainView {
             thumbs: HashMap::new(),
             viewer_open: false,
             full: HashMap::new(),
+            revealed: HashSet::new(),
+            list_view: saved_ui.list_view,
             copied_for: None,
             copied_gen: 0,
             image_dims: HashMap::new(),
@@ -376,6 +383,7 @@ impl MainView {
                 let same_phone = p.udid().is_some() && p.udid() == self.phase.udid();
                 if !matches!(p, Phase::Ready { .. }) || !same_phone {
                     self.reloading = false;
+                    self.revealed.clear();
                     self.library = LibState::None;
                     self.selection = Selection::All;
                     self.show_details = false;
@@ -490,9 +498,11 @@ impl MainView {
         let mut keys = Vec::new();
         for a in self.assets().iter().filter(|a| a.hidden) {
             files.push(self.paths.thumb(&udid, a));
+            files.push(self.paths.veil(&udid, a));
             files.push(self.paths.view(&udid, a));
             keys.push(a.device_path());
         }
+        self.revealed.clear();
         for key in keys {
             self.thumbs.remove(&key);
             self.full.remove(&key);
@@ -602,6 +612,33 @@ impl MainView {
             });
         })
         .detach();
+    }
+
+    /// A Hidden-album item the user hasn't chosen to see: shown blurred,
+    /// and its full-size image isn't fetched.
+    pub(crate) fn veiled(&self, a: &rollcopy_library::Asset) -> bool {
+        a.hidden && !self.revealed.contains(&a.device_path())
+    }
+
+    /// Thumbnail to show for an item: the blurred copy while it's veiled.
+    pub(crate) fn thumb_for(&self, a: &rollcopy_library::Asset) -> Option<PathBuf> {
+        let Some(Thumb::Ready(path)) = self.thumbs.get(&a.device_path()) else {
+            return None;
+        };
+        if a.hidden && !self.veiled(a) {
+            // The map holds the blurred copy; the real one sits beside it.
+            return self.udid().map(|u| self.paths.thumb(u, a));
+        }
+        Some(path.clone())
+    }
+
+    /// Shows or blurs a Hidden-album item again.
+    pub(crate) fn set_revealed(&mut self, key: String, show: bool) {
+        if show {
+            self.revealed.insert(key);
+        } else {
+            self.revealed.remove(&key);
+        }
     }
 
     /// Whether the item with this device path is known to be copied.
@@ -1519,10 +1556,12 @@ impl MainView {
             maximized,
         };
         let (preview, expanded) = (self.preview_w, self.transfers.expanded);
+        let list_view = self.list_view;
         Prefs::update_ui(cx, |ui| {
             ui.window = Some(saved);
             ui.preview_width = preview;
             ui.transfers_expanded = expanded;
+            ui.list_view = list_view;
         });
     }
 

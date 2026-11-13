@@ -70,11 +70,17 @@ impl MainView {
             return pane.child(muted("Select an item to see its details.".into(), &theme));
         };
 
-        let image = match self.thumbs.get(&a.device_path()) {
-            Some(Thumb::Ready(path)) => img(path.clone())
+        let veiled = self.veiled(a);
+        let key = a.device_path();
+        let image = match (self.thumbs.get(&key), self.thumb_for(a)) {
+            (Some(Thumb::Ready(_)), Some(path)) => img(path)
                 .w_full()
                 .h(px(image_h))
-                .object_fit(ObjectFit::Contain)
+                .object_fit(if veiled {
+                    ObjectFit::Cover
+                } else {
+                    ObjectFit::Contain
+                })
                 .into_any_element(),
             _ => div()
                 .w_full()
@@ -89,6 +95,44 @@ impl MainView {
         } else {
             "Open"
         };
+
+        // Hidden album: blurred until the user asks to see it.
+        let image = div()
+            .relative()
+            .rounded_md()
+            .overflow_hidden()
+            .child(image)
+            .when(a.hidden, |d| {
+                let key = key.clone();
+                d.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .when(!veiled, |d| d.items_end().justify_end().p_2())
+                        .child(
+                            btn("preview-reveal")
+                                .small()
+                                .icon(if veiled {
+                                    IconName::Eye
+                                } else {
+                                    IconName::EyeOff
+                                })
+                                .when(veiled, |b| b.label("Show"))
+                                .tooltip(if veiled {
+                                    "Hidden album: show this item"
+                                } else {
+                                    "Blur again"
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.set_revealed(key.clone(), veiled);
+                                    cx.notify();
+                                })),
+                        ),
+                )
+            });
 
         pane.child(image)
             .child(

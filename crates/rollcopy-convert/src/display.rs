@@ -15,6 +15,16 @@ use crate::heic::{decode_heic, write_jpeg};
 
 const QUALITY: u8 = 88;
 
+/// Writes a heavily blurred, tiny copy of an image (a thumbnail) to `dst`,
+/// for Hidden-album items shown before the user chooses to see them. Only
+/// colours survive: at 48 px wide and blurred, nothing is recognisable.
+pub fn veil_jpeg(src: &Path, dst: &Path) -> Result<(), ConvertError> {
+    let img = image::open(src).map_err(|e| ConvertError::Decode(e.to_string()))?;
+    let small = img.resize(48, 48, FilterType::Triangle).blur(4.0).to_rgb8();
+    let size = small.dimensions();
+    write_jpeg(dst, small.as_raw(), size, 70, None, None)
+}
+
 /// Pixel size of an image file, read from its header only.
 pub fn image_size(path: &Path) -> Option<(u32, u32)> {
     image::image_dimensions(path).ok()
@@ -93,6 +103,21 @@ mod tests {
         assert_eq!((back.width(), back.height()), (50, 100));
         // Small photos aren't enlarged.
         assert_eq!(display_jpeg(&src, &dst, 4000).unwrap(), (200, 400));
+    }
+
+    #[test]
+    fn veil_is_tiny() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("5005.JPG");
+        image::RgbImage::from_fn(480, 360, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 0])
+        })
+        .save(&src)
+        .unwrap();
+        let dst = dir.path().join("veil.jpg");
+        veil_jpeg(&src, &dst).unwrap();
+        let back = image::open(&dst).unwrap();
+        assert_eq!((back.width(), back.height()), (48, 36));
     }
 
     #[test]

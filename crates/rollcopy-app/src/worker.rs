@@ -81,6 +81,9 @@ pub struct ThumbReq {
     /// Phone path of iOS's own thumbnail (`.../5005.JPG`).
     pub source: String,
     pub dest: PathBuf,
+    /// Hidden-album items: also make this blurred copy, and report it as
+    /// the thumbnail.
+    pub veil: Option<PathBuf>,
 }
 
 /// App directories: cache root (`~/.cache/rollcopy`) and state directory
@@ -118,6 +121,13 @@ impl CachePaths {
             .join(udid)
             .join(&a.directory)
             .join(name)
+    }
+
+    /// Blurred copy of a Hidden-album item's thumbnail, shown until the user
+    /// chooses to see it: `thumbs/<udid>/<dir>/<file>.veil.jpg`.
+    pub fn veil(&self, udid: &str, a: &Asset) -> PathBuf {
+        let thumb = self.thumb(udid, a);
+        thumb.with_extension("veil.jpg")
     }
 
     /// Screen-sized image for the viewer: `view/<udid>/<dir>/<file>[.e<edit>].jpg`
@@ -456,7 +466,7 @@ async fn serve_commands(
         let ev = match fetch_thumb(&mut conn, &udid, &req).await {
             Ok(()) => Event::Thumb {
                 key: req.key,
-                path: req.dest,
+                path: req.veil.unwrap_or(req.dest),
             },
             Err(DeviceError::NotFound(_)) => Event::ThumbMissing { key: req.key },
             Err(e) if e.is_connection_problem() => {
@@ -481,16 +491,24 @@ async fn fetch_thumb(
     udid: &str,
     req: &ThumbReq,
 ) -> Result<(), DeviceError> {
-    if req.dest.exists() {
-        return Ok(());
+    if !req.dest.exists() {
+        let fs = connect(conn, udid).await?;
+        if let Some(dir) = req.dest.parent() {
+            tokio::fs::create_dir_all(dir).await?;
+        }
+        let part = part_path(&req.dest);
+        fs.copy_to_local(&req.source, &part, |_| {}).await?;
+        tokio::fs::rename(&part, &req.dest).await?;
     }
-    let fs = connect(conn, udid).await?;
-    if let Some(dir) = req.dest.parent() {
-        tokio::fs::create_dir_all(dir).await?;
+    if let Some(veil) = req.veil.clone()
+        && !veil.exists()
+    {
+        let src = req.dest.clone();
+        tokio::task::spawn_blocking(move || rollcopy_convert::veil_jpeg(&src, &veil))
+            .await
+            .map_err(|e| DeviceError::Other(e.to_string()))?
+            .map_err(|e| DeviceError::Other(e.to_string()))?;
     }
-    let part = part_path(&req.dest);
-    fs.copy_to_local(&req.source, &part, |_| {}).await?;
-    tokio::fs::rename(&part, &req.dest).await?;
     Ok(())
 }
 

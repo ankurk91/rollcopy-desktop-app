@@ -77,7 +77,7 @@ impl Transfers {
     }
 }
 
-fn human_size(bytes: u64) -> String {
+pub(crate) fn human_size(bytes: u64) -> String {
     let b = bytes as f64;
     if b >= 1e9 {
         format!("{:.2} GB", b / 1e9)

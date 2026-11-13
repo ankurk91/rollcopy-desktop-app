@@ -66,7 +66,8 @@ impl MainView {
         let Some(a) = self.assets().get(idx) else {
             return;
         };
-        if a.kind != MediaKind::Photo {
+        // Hidden album: nothing full-size until the user asks to see it.
+        if a.kind != MediaKind::Photo || self.veiled(a) {
             return;
         }
         let key = a.device_path();
@@ -118,8 +119,9 @@ impl MainView {
         let a = self.assets().get(idx)?.clone();
         let key = a.device_path();
         let total = self.visible.len();
+        let veiled = self.veiled(&a);
         let thumb = match self.thumbs.get(&key) {
-            Some(Thumb::Ready(p)) => Some(p.clone()),
+            Some(Thumb::Ready(_)) => self.thumb_for(&a),
             _ => None,
         };
         // The box the image is drawn in: the full image's own size once it's
@@ -148,7 +150,24 @@ impl MainView {
                 .into_any_element()
         };
 
+        let reveal_key = key.clone();
         let (image, overlay): (AnyElement, Option<AnyElement>) = match a.kind {
+            _ if veiled => (
+                thumb
+                    .map(contained)
+                    .unwrap_or_else(|| div().into_any_element()),
+                Some(
+                    btn("viewer-reveal")
+                        .large()
+                        .icon(IconName::Eye)
+                        .label("Show hidden item")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.set_revealed(reveal_key.clone(), true);
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                ),
+            ),
             MediaKind::Photo => match self.full.get(&key) {
                 Some(Full::Ready(p)) => (contained(p.clone()), None),
                 Some(Full::Failed(e)) => (
