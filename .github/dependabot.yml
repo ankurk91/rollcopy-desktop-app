@@ -1,0 +1,25 @@
+# Keeps the SHA-pinned GitHub Actions and the Cargo dependencies current,
+# one grouped pull request per ecosystem.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      cargo:
+        patterns: ["*"]
+    ignore:
+      # Pinned on purpose (pre-1.0, APIs move); updated by hand with testing.
+      - dependency-name: gpui-kit
+      - dependency-name: gpui-kit-assets
+      - dependency-name: idevice
+      - dependency-name: libheif-rs

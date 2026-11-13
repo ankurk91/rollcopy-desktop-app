@@ -11,8 +11,9 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
 
+# Nothing can write by default; only the publish job gets write access.
 permissions:
-  contents: write
+  contents: read
 
 # One release run at a time; a new run waits for the running one instead of
 # cancelling it (a cancelled run could leave a half-made draft release).
@@ -24,15 +25,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  package:
-    name: .deb + AppImage (Ubuntu 24.04, amd64)
+  # Compiles ~860 third-party crates (their build scripts run here), so it
+  # has a read-only token, keeps no credentials and uses no shared cache.
+  # Tests aren't re-run: CI already gates every commit on main.
+  build:
+    name: Build .deb + AppImage (Ubuntu 24.04, amd64)
     runs-on: ubuntu-24.04
-    # Tests, a release build and packaging take ~35–45 min on a cold cache;
-    # fail stuck runs early instead of using the 6-hour default.
+    # A cold release build and packaging take ~30 min; fail stuck runs early.
     timeout-minutes: 75
     steps:
-      - name: Checkout the code
-        uses: actions/checkout@v7
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check the tag is semver and matches Cargo.toml
         if: github.ref_type == 'tag'
@@ -51,16 +56,12 @@ jobs:
         run: packaging/ci-deps.sh
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo registry and build output
-        uses: Swatinem/rust-cache@v2
-
-      - name: Run tests
-        run: cargo test --workspace
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10-16
+        with:
+          toolchain: stable
 
       - name: Build the release binary
-        run: cargo build --release -p rollcopy-app
+        run: cargo build --release --locked -p rollcopy-app
 
       - name: Build the .deb package
         run: |
@@ -74,17 +75,42 @@ jobs:
 
       - name: Write SHA256 checksums
         working-directory: dist
-        run: sha256sum *.deb *.AppImage | tee SHA256SUMS
+        run: sha256sum -- *.deb *.AppImage | tee SHA256SUMS
 
       - name: Upload packages as a workflow artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rollcopy-packages
           path: dist/*
+          if-no-files-found: error
+
+  # Only downloads the finished packages; nothing is compiled or run here.
+  publish:
+    name: Attest and create a draft release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write # the draft release
+      id-token: write # signing the build provenance
+      attestations: write
+    steps:
+      - name: Download the packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rollcopy-packages
+          path: dist
+
+      - name: Attest build provenance (verify with `gh attestation verify`)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.deb
+            dist/*.AppImage
 
       - name: Create a draft GitHub release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           draft: true
           generate_release_notes: true

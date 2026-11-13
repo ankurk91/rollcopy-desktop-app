@@ -15,6 +15,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+# Third-party actions are pinned to commit SHAs (tags can be moved);
+# Dependabot keeps them current (.github/dependabot.yml).
+
 jobs:
   check:
     name: fmt, clippy, test (Ubuntu 24.04, amd64)
@@ -23,24 +26,92 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out the code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install system packages
         run: packaging/ci-deps.sh
 
+      - name: Install ffmpeg (for the video conversion test)
+        run: sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Install Rust (stable, with rustfmt and clippy)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10-16
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Cache Cargo registry and build output
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Check formatting
         run: cargo fmt --all --check
 
       - name: Run clippy (warnings are errors)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
+
+  msrv:
+    name: Builds with the minimum Rust (rust-version in Cargo.toml)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install system packages
+        run: packaging/ci-deps.sh
+
+      - name: Read rust-version from Cargo.toml
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust ${{ steps.msrv.outputs.version }}
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10-16
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      - name: Cache Cargo registry and build output
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Check the workspace
+        run: cargo check --workspace --locked
+
+  deny:
+    name: Dependencies (advisories, licences, sources)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run cargo-deny (config in deny.toml)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+
+  packaging:
+    name: Desktop file and AppStream metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils appstream
+
+      - name: Validate the .desktop file
+        run: desktop-file-validate packaging/io.github.ankurk91.Rollcopy.desktop
+
+      - name: Validate the AppStream metainfo
+        run: appstreamcli validate --no-net packaging/io.github.ankurk91.Rollcopy.metainfo.xml

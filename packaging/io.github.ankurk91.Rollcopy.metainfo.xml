@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata: shown by software centres (GNOME Software, Discover,
+     Flathub). Checked in CI with `appstreamcli validate`. -->
+<component type="desktop-application">
+  <id>io.github.ankurk91.Rollcopy</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Rollcopy</name>
+  <summary>Copy photos and videos from your iPhone over USB</summary>
+  <developer id="io.github.ankurk91">
+    <name>ankurk91</name>
+  </developer>
+  <description>
+    <p>
+      Plug in your iPhone, pick photos and videos, and get files that open
+      everywhere: HEIC becomes JPG and MOV becomes MP4 (lossless), arranged
+      by the date each item was taken.
+    </p>
+    <ul>
+      <li>Browse the library by year and month, with thumbnails and details</li>
+      <li>Edited photos are copied as edited; Live Photos as stills</li>
+      <li>Shows what is already copied, so you only copy what's new</li>
+      <li>Read-only towards the phone: it never changes or deletes anything there</li>
+      <li>Works offline; no account or cloud needed</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.ankurk91.Rollcopy.desktop</launchable>
+  <provides>
+    <binary>rollcopy</binary>
+  </provides>
+  <url type="homepage">https://github.com/ankurk91/rollcopy-desktop-app</url>
+  <url type="bugtracker">https://github.com/ankurk91/rollcopy-desktop-app/issues</url>
+  <url type="vcs-browser">https://github.com/ankurk91/rollcopy-desktop-app</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>The library with the preview pane</caption>
+      <image>https://raw.githubusercontent.com/ankurk91/rollcopy-desktop-app/main/.github/screenshot.png</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>Graphics</category>
+    <category>Photography</category>
+  </categories>
+  <keywords>
+    <keyword>iPhone</keyword>
+    <keyword>HEIC</keyword>
+    <keyword>photos</keyword>
+    <keyword>import</keyword>
+  </keywords>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-12"/>
+  </releases>
+</component>

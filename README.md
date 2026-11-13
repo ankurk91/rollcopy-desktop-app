@@ -179,3 +179,10 @@ the way. AI coding agents: see [AGENTS.md](AGENTS.md).
 [gpui-kit / gpui-component](https://github.com/longbridge/gpui-kit) (Apache-2.0),
 [idevice](https://crates.io/crates/idevice) (MIT), libheif and libde265 (LGPL-3.0), FFmpeg
 (run as a separate program) and [Lucide](https://lucide.dev) icons (ISC).
+
+libheif and libde265 are under the LGPL-3.0. libde265 is linked dynamically (the system's copy).
+libheif is compiled into the `rollcopy` binary through the
+[libheif-rs](https://crates.io/crates/libheif-rs) crate's `embedded-libheif` feature. As the LGPL asks,
+you can rebuild Rollcopy with a modified libheif: the complete source is in this repository and
+[Building from source](#building-from-source) shows how; point the `libheif-sys` crate at your libheif
+with a `[patch.crates-io]` entry, or turn `embedded-libheif` off to link a system libheif.

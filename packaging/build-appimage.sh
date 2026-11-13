@@ -32,6 +32,9 @@ if [[ ! -x "$LD" ]]; then
 fi
 
 rm -rf "${APPDIR:?}"
+mkdir -p "$APPDIR/usr/share/metainfo"
+# appimagetool looks for the older .appdata.xml name.
+cp "$ROOT/packaging/$ID.metainfo.xml" "$APPDIR/usr/share/metainfo/$ID.appdata.xml"
 # No FUSE needed (CI runners don't have it).
 export APPIMAGE_EXTRACT_AND_RUN=1
 export LINUXDEPLOY_OUTPUT_VERSION="$VERSION"
