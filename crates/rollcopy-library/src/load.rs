@@ -146,24 +146,46 @@ pub async fn scan_dcim(fs: &mut MediaFs) -> Result<Vec<Asset>, DeviceError> {
     Ok(assets)
 }
 
+/// Deletes the local database copy. It holds the phone's whole library
+/// history (places, people, captions), so it isn't kept once read
+/// (audit SEC-02).
+pub fn remove_photos_db(dir: &Path) {
+    for name in DB_FILES {
+        let _ = std::fs::remove_file(dir.join(name));
+        let _ = std::fs::remove_file(dir.join(format!("{name}.part")));
+    }
+    let _ = std::fs::remove_dir(dir);
+}
+
 /// Loads the library: Photos DB copy if possible, else a `DCIM/` scan; then
-/// attaches edited versions. `cache_dir` receives the database copy.
+/// attaches edited versions. `cache_dir` receives the database copy, which
+/// is deleted again once read.
 ///
 /// Device errors (lock, disconnect) are returned; database problems only
 /// switch to the fallback.
 pub async fn load(session: &Session, cache_dir: &Path) -> Result<Library, DeviceError> {
     let mut fs = session.media().await?;
 
-    let from_db = match fetch_photos_db(&mut fs, cache_dir).await {
+    let fetched = fetch_photos_db(&mut fs, cache_dir).await;
+    let from_db = match fetched {
         Ok(path) => {
-            let path2 = path.clone();
-            tokio::task::spawn_blocking(move || photos_db::read_assets(&path2))
-                .await
-                .map_err(|e| DeviceError::Other(e.to_string()))?
-                .map_err(|e| e.to_string())
+            let dir = cache_dir.to_path_buf();
+            tokio::task::spawn_blocking(move || {
+                let assets = photos_db::read_assets(&path);
+                remove_photos_db(&dir);
+                assets
+            })
+            .await
+            .map_err(|e| DeviceError::Other(e.to_string()))?
+            .map_err(|e| e.to_string())
         }
-        Err(e) if e.is_connection_problem() => return Err(e),
-        Err(e) => Err(e.to_string()),
+        Err(e) => {
+            remove_photos_db(cache_dir);
+            if e.is_connection_problem() {
+                return Err(e);
+            }
+            Err(e.to_string())
+        }
     };
 
     let (mut assets, source) = match from_db {
@@ -186,6 +208,18 @@ pub async fn load(session: &Session, cache_dir: &Path) -> Result<Library, Device
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn database_copy_is_removed() {
+        let dir = std::env::temp_dir().join(format!("rollcopy-dbtest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in DB_FILES {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        std::fs::write(dir.join("Photos.sqlite.part"), b"x").unwrap();
+        remove_photos_db(&dir);
+        assert!(!dir.exists());
+    }
 
     #[test]
     fn edits_match_by_stem_and_kind() {

@@ -285,6 +285,21 @@ pub fn save<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn private_dirs_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("a/b");
+        create_private_dir(&dir).unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        // An existing, looser folder is tightened.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        create_private_dir(&dir).unwrap();
+        assert_eq!(mode(&dir), 0o700);
+    }
+
     #[test]
     fn round_trips_and_survives_restart() {
         let dir = tempfile::tempdir().unwrap();

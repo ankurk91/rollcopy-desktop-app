@@ -133,6 +133,7 @@ fn main() {
         instance::Lock::Unavailable => None,
     };
     let worker = worker::spawn(paths.clone());
+    let paths_at_exit = paths.clone();
 
     gpui_kit::application().with_assets(Assets).run(move |cx| {
         gpui_kit::init(cx);
@@ -144,6 +145,12 @@ fn main() {
         cx.on_action(|_: &view::ViewOnGitHub, cx| cx.open_url(update::REPO_URL));
         cx.on_action(|_: &view::ReportIssue, cx| cx.open_url(update::ISSUES_URL));
         cx.on_action(|_: &view::Quit, cx| cx.quit());
+        // Session-only files (viewer images, opened files) go at quit.
+        cx.on_app_quit(move |_| {
+            paths_at_exit.tidy();
+            async {}
+        })
+        .detach();
 
         let options = WindowOptions {
             window_bounds: Some(

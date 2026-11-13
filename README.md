@@ -141,7 +141,12 @@ No. Rollcopy only reads from the phone; it never changes or deletes anything on 
 |---|---|
 | `~/.config/rollcopy/config.toml` | Preferences |
 | `~/.local/state/rollcopy/` | Window layout, failed-copy history |
-| `~/.cache/rollcopy/` | Thumbnails, copies of the Photos database (safe to delete) |
+| `~/.cache/rollcopy/` | Thumbnails (safe to delete) |
+
+The cache and state folders are readable by you only. While a phone loads, Rollcopy copies its Photos
+database (dates, places, albums) into `~/.cache/rollcopy/db/` and deletes it as soon as the library is read.
+Full-size photos for the viewer and files you *Open* are kept in `~/.cache/rollcopy/view/` and `open/` until
+Rollcopy quits. Thumbnails stay until you reset; those of Hidden-album items are deleted unless you show that album.
 
 *Preferences → App → Reset and restart* clears all three (never your copied files or the phone).
 

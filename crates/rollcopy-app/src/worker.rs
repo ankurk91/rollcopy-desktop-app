@@ -152,10 +152,28 @@ pub struct Worker {
     pub tray: async_channel::Sender<crate::tray::TrayState>,
 }
 
+impl CachePaths {
+    /// Makes the cache and state folders private, and clears what is only
+    /// kept for one session: viewer images, opened files, and a database
+    /// copy or staging files left by a crash (audit SEC-02, REL-09). Called
+    /// at startup, under the single-instance lock, and at quit.
+    pub fn tidy(&self) {
+        let _ = crate::config::create_private_dir(&self.root);
+        let _ = crate::config::create_private_dir(&self.state);
+        for dir in [
+            self.root.join("view"),
+            self.open_dir(),
+            self.staging(),
+            self.root.join("db"),
+        ] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
 /// Starts the worker thread.
 pub fn spawn(paths: CachePaths) -> Worker {
-    // Full-size viewer images are only kept for one session.
-    let _ = std::fs::remove_dir_all(paths.root.join("view"));
+    paths.tidy();
     let (ev_tx, ev_rx) = async_channel::unbounded();
     let (cmd_tx, cmd_rx) = async_channel::unbounded();
     let (tray_tx, tray_rx) = async_channel::unbounded();
