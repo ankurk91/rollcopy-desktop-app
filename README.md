@@ -13,7 +13,7 @@ on the way.
 
 ![Rollcopy on Linux Mint: an iPhone photo library by year and month with Hidden and Recently Deleted, a thumbnail grid with copied badges and filters, the preview pane with photo details, and the transfer queue](.github/screenshot.jpg)
 
-> **Status:** early (0.3.1). Linux only. Tested on Linux Mint 22 (Cinnamon, X11) with iOS 27, and on
+> **Status:** early (0.4.0). Linux only. Tested on Linux Mint 22 (Cinnamon, X11) with iOS 27, and on
 > Ubuntu 26.04 (GNOME, Wayland) in a virtual machine.
 
 ## Features
@@ -80,14 +80,14 @@ Download the latest `.deb` or `.AppImage` from
 **.deb** (installs `usbmuxd` and `ffmpeg` if needed):
 
 ```sh
-sudo apt install ./rollcopy_0.3.1-1_amd64.deb
+sudo apt install ./rollcopy_0.4.0-1_amd64.deb
 ```
 
 **AppImage** (install `usbmuxd` and `ffmpeg` first, see Requirements):
 
 ```sh
-chmod +x Rollcopy-0.3.1-x86_64.AppImage
-./Rollcopy-0.3.1-x86_64.AppImage
+chmod +x Rollcopy-0.4.0-x86_64.AppImage
+./Rollcopy-0.4.0-x86_64.AppImage
 ```
 
 **From source** for your user only (see [Building from source](#building-from-source)):
@@ -124,6 +124,8 @@ packaging/install-local.sh --uninstall
   a hub. Many cheap cables only charge.
 - **"Unlock your iPhone and tap Trust" doesn't go away:** unplug, unlock the phone, plug in again and
   tap **Trust**. If you tapped **Don't Trust**, unplugging and plugging in asks again.
+- **Saving to a network share:** shares opened in Files (`smb://…`, under `/run/user/…/gvfs/`), sshfs
+  and some USB-drive FUSE drivers work. Rollcopy still never replaces a file that's already there.
 - **Videos don't play (fresh Ubuntu):** Ubuntu's video player can't decode iPhone (HEVC) or app
   (H.264) videos until its codecs are installed: `sudo apt install gstreamer1.0-libav`, or install
   VLC. Rollcopy says so when you *Open* a video and the codecs are missing. The copied files are fine.

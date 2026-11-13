@@ -49,6 +49,17 @@
   </keywords>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.4.0" date="2026-11-13">
+      <description>
+        <ul>
+          <li>Copying to network shares opened in Files (and sshfs or FUSE drives) works</li>
+          <li>A phone that stops responding no longer stalls copying; it resumes by itself</li>
+          <li>Cancel also stops video and photo conversion straight away</li>
+          <li>Simpler tray icon with a clearer status dot</li>
+          <li>Clear messages when no app can open a file or the video player lacks codecs</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-11-13">
       <description>
         <p>Title bar and window buttons on GNOME (Wayland), such as Ubuntu; toolbar buttons
