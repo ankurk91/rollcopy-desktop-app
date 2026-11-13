@@ -174,6 +174,8 @@ pub struct MainView {
     pub(crate) viewer_open: bool,
     /// Full-size photos for the viewer, by device path.
     pub(crate) full: HashMap<String, crate::viewer::Full>,
+    /// Pixel sizes of images shown in the viewer, read once per file.
+    pub(crate) image_dims: HashMap<PathBuf, Option<(u32, u32)>>,
     /// Items per filter chip for the current tree selection, cached so the
     /// header doesn't walk the whole library every frame.
     pub(crate) filter_counts: [usize; 4],
@@ -298,6 +300,7 @@ impl MainView {
             thumbs: HashMap::new(),
             viewer_open: false,
             full: HashMap::new(),
+            image_dims: HashMap::new(),
             filter_counts: [0; 4],
             sync_filter: SyncFilter::All,
             sync_counts: [0; 3],
@@ -1057,7 +1060,7 @@ impl Render for MainView {
         let transfers = self.render_transfers(cx);
         let conflict = self.render_conflict(cx);
         let toolbar = self.render_toolbar(cx).into_any_element();
-        let viewer = self.render_viewer(cx);
+        let viewer = self.render_viewer(window, cx);
         let ready = matches!(self.library, LibState::Loaded { .. })
             && matches!(self.phase, Phase::Ready { .. });
         v_flex()

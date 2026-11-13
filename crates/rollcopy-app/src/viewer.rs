@@ -20,6 +20,23 @@ use rollcopy_library::MediaKind;
 use crate::view::{MainView, Thumb, btn};
 use crate::worker::Command;
 
+const HEADER_H: f32 = 44.;
+const FOOTER_H: f32 = 28.;
+/// Room on each side for the ← → buttons.
+const SIDE: f32 = 64.;
+const BOTTOM: f32 = 8.;
+
+/// Size to draw an image of `img` pixels so it fits inside `room`, keeping
+/// its aspect ratio (scaled up or down). gpui's `img()` gives itself the
+/// image's aspect ratio and, inside a flexible box, grew to the full width
+/// and spilled out at the bottom, so the viewer sizes images itself.
+pub(crate) fn fit(img: (u32, u32), room: (f32, f32)) -> (f32, f32) {
+    let (iw, ih) = (img.0.max(1) as f32, img.1.max(1) as f32);
+    let (rw, rh) = (room.0.max(1.), room.1.max(1.));
+    let scale = (rw / iw).min(rh / ih);
+    (iw * scale, ih * scale)
+}
+
 /// State of a full-size image, by asset device path.
 pub(crate) enum Full {
     Pending,
@@ -71,7 +88,19 @@ impl MainView {
         });
     }
 
-    pub(crate) fn render_viewer(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// An image file's pixel size, cached.
+    fn dims_of(&mut self, path: &std::path::Path) -> Option<(u32, u32)> {
+        *self
+            .image_dims
+            .entry(path.to_path_buf())
+            .or_insert_with(|| rollcopy_convert::image_size(path))
+    }
+
+    pub(crate) fn render_viewer(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         if !self.viewer_open {
             return None;
         }
@@ -93,9 +122,28 @@ impl MainView {
             Some(Thumb::Ready(p)) => Some(p.clone()),
             _ => None,
         };
+        // The box the image is drawn in: the full image's own size once it's
+        // here, else the item's size from the library, else the thumbnail's.
+        let full_path = match self.full.get(&key) {
+            Some(Full::Ready(p)) if a.kind == MediaKind::Photo => Some(p.clone()),
+            _ => None,
+        };
+        let dims = full_path
+            .as_ref()
+            .and_then(|p| self.dims_of(p))
+            .or_else(|| a.width.zip(a.height))
+            .or_else(|| thumb.as_ref().and_then(|p| self.dims_of(p)))
+            .unwrap_or((4, 3));
+        let viewport = window.viewport_size();
+        let room = (
+            f32::from(viewport.width) - 2. * SIDE,
+            f32::from(viewport.height) - HEADER_H - FOOTER_H - BOTTOM,
+        );
+        let (w, h) = fit(dims, room);
         let contained = |p: PathBuf| {
             img(p)
-                .size_full()
+                .w(px(w))
+                .h(px(h))
                 .object_fit(ObjectFit::Contain)
                 .into_any_element()
         };
@@ -175,15 +223,16 @@ impl MainView {
                 .id("viewer")
                 .absolute()
                 .inset_0()
-                .bg(hsla(0., 0., 0.04, 0.97))
+                .bg(hsla(0., 0., 0.04, 1.))
                 .text_color(white())
                 // Clicks stay in the viewer.
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
                     h_flex()
                         .w_full()
+                        .h(px(HEADER_H))
+                        .flex_shrink_0()
                         .px_4()
-                        .py_2()
                         .gap_3()
                         .items_center()
                         .child(
@@ -224,17 +273,12 @@ impl MainView {
                         .relative()
                         .flex_1()
                         .min_h_0()
-                        // Absolute, so the image gets a definite box and is
-                        // scaled into it instead of spilling out at full size.
-                        .child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .bottom_4()
-                                .left(px(64.))
-                                .right(px(64.))
-                                .child(image),
-                        )
+                        .overflow_hidden()
+                        .pb(px(BOTTOM))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(image)
                         .when_some(overlay, |d, o| {
                             d.child(
                                 div()
@@ -250,12 +294,17 @@ impl MainView {
                         .child(right),
                 )
                 .child(
-                    h_flex().justify_center().pb_2().child(
-                        div()
-                            .text_xs()
-                            .text_color(hsla(0., 0., 0.6, 1.))
-                            .child("← → move   Esc close"),
-                    ),
+                    h_flex()
+                        .h(px(FOOTER_H))
+                        .flex_shrink_0()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(hsla(0., 0., 0.6, 1.))
+                                .child("← → move   Esc close"),
+                        ),
                 )
                 .into_any_element(),
         )
@@ -265,4 +314,24 @@ impl MainView {
 /// Small helper so the empty-state code can show a large icon.
 pub(crate) fn big_icon(icon: IconName, color: Hsla) -> impl IntoElement {
     Icon::new(icon).with_size(px(48.)).text_color(color)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit;
+
+    #[test]
+    fn fits_inside_the_room_keeping_shape() {
+        // Tall photo in a wide window: limited by height.
+        let (w, h) = fit((899, 1599), (1028., 700.));
+        assert_eq!(h, 700.);
+        assert!((w - 393.56).abs() < 0.01, "{w}");
+        // Wide photo: limited by width.
+        assert_eq!(fit((4000, 3000), (1000., 1000.)), (1000., 750.));
+        // Small images are scaled up to fill.
+        assert_eq!(fit((480, 360), (960., 960.)), (960., 720.));
+        // Degenerate input doesn't divide by zero.
+        let (w, h) = fit((0, 0), (0., 0.));
+        assert!(w.is_finite() && h.is_finite());
+    }
 }

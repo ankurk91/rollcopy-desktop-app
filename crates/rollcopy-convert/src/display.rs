@@ -15,6 +15,11 @@ use crate::heic::{decode_heic, write_jpeg};
 
 const QUALITY: u8 = 88;
 
+/// Pixel size of an image file, read from its header only.
+pub fn image_size(path: &Path) -> Option<(u32, u32)> {
+    image::image_dimensions(path).ok()
+}
+
 /// Writes a viewer JPEG of the photo at `src` to `dst`. HEIC/HEIF, JPEG and
 /// PNG are read; other formats return `Decode`, and the caller can show the
 /// file as it is.

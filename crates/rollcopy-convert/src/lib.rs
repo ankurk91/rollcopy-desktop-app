@@ -6,7 +6,7 @@ pub mod exif;
 mod heic;
 mod video;
 
-pub use display::display_jpeg;
+pub use display::{display_jpeg, image_size};
 pub use heic::{DEFAULT_JPEG_QUALITY, JpegInfo, heic_to_jpeg, verify_jpeg};
 pub use video::{VideoInfo, VideoMode, ffmpeg_available, probe, to_mp4, verify_mp4};
 
