@@ -212,6 +212,8 @@ pub struct UiState {
     pub transfers_expanded: bool,
     /// The library is shown as a list (no thumbnails) instead of a grid.
     pub list_view: bool,
+    /// List column widths in pixels.
+    pub list_columns: Vec<f32>,
     /// Unix seconds of the last update check (for the once-a-day limit).
     pub last_update_check: Option<i64>,
 }
@@ -223,6 +225,7 @@ impl Default for UiState {
             preview_width: 300.,
             transfers_expanded: true,
             list_view: false,
+            list_columns: Vec::new(),
             last_update_check: None,
         }
     }

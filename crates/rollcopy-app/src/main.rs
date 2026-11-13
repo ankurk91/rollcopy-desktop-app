@@ -5,6 +5,7 @@ mod config;
 mod grid;
 mod icons;
 mod instance;
+mod list;
 mod log;
 mod notify;
 mod paths;

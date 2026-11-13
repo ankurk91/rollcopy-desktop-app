@@ -20,11 +20,9 @@ use crate::worker::{Command, ThumbReq, phone_thumb_path};
 /// Smallest tile; tiles stretch so each row fills the width.
 pub(crate) const MIN_TILE: f32 = 132.;
 const GAP: f32 = 8.;
-const PAD: f32 = 16.;
+pub(crate) const PAD: f32 = 16.;
 /// Room for the scrollbar so the last column never sits under it.
 const SCROLLBAR: f32 = 14.;
-const LIST_ROW_H: f32 = 32.;
-const LIST_PAD: f32 = 8.;
 
 impl MainView {
     /// Tiles per row for the current window width.
@@ -553,141 +551,9 @@ impl MainView {
         cx.notify();
     }
 
-    fn render_list_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
-        h_flex()
-            .px(px(PAD + LIST_PAD))
-            .pb_1()
-            .gap_3()
-            .text_xs()
-            .text_color(theme.muted_foreground)
-            .child(div().w(px(36.)))
-            .child(div().flex_1().min_w(px(120.)).child("Name"))
-            .child(div().w(px(150.)).child("Taken"))
-            .child(div().w(px(110.)).child("Size"))
-            .child(div().w(px(70.)).child("File"))
-            .child(div().w(px(110.)))
-            .child(div().w(px(20.)))
-    }
-
-    fn render_list_row(&self, pos: usize, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
-        let idx = self.visible[pos];
-        let a = &self.assets()[idx];
-        let key = a.device_path();
-        let selected = self.selected.contains(&key);
-        let focused = self.focused == Some(idx);
-        let taken = a
-            .captured_local()
-            .map(|d| d.format("%-d %b %Y %H:%M").to_string())
-            .unwrap_or_else(|| "Undated".into());
-        let size = match (a.width, a.height, a.kind, a.duration_secs) {
-            (_, _, MediaKind::Video, Some(s)) => {
-                format!("▶ {}:{:02}", s as u64 / 60, s as u64 % 60)
-            }
-            (Some(w), Some(h), _, _) => format!("{w} × {h}"),
-            _ => String::new(),
-        };
-        let file = a
-            .original_size
-            .map(crate::transfers::human_size)
-            .unwrap_or_default();
-        let mut tags = Vec::new();
-        if a.live_photo {
-            tags.push("Live");
-        }
-        if a.is_edited() {
-            tags.push("Edited");
-        }
-        if a.hidden {
-            tags.push("Hidden");
-        }
-        h_flex()
-            .id(("row", pos))
-            .h(px(LIST_ROW_H))
-            .px(px(LIST_PAD))
-            .gap_3()
-            .items_center()
-            .rounded_md()
-            .text_sm()
-            .cursor_pointer()
-            .border_1()
-            .border_color(if focused {
-                theme.ring
-            } else {
-                transparent_black()
-            })
-            .when(selected, |d| d.bg(theme.accent))
-            .when(!selected, |d| d.hover(|s| s.bg(theme.muted)))
-            .when(a.trashed, |d| d.text_color(theme.muted_foreground))
-            .child(
-                h_flex()
-                    .w(px(36.))
-                    .gap_1()
-                    .child(
-                        div()
-                            .w(px(14.))
-                            .text_color(theme.primary)
-                            .child(if selected { "✓" } else { "" }),
-                    )
-                    .child(
-                        Icon::new(if a.kind == MediaKind::Video {
-                            IconName::Video
-                        } else {
-                            IconName::Image
-                        })
-                        .small()
-                        .text_color(theme.muted_foreground),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(120.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(a.filename.clone()),
-            )
-            .child(div().w(px(150.)).child(taken))
-            .child(
-                div()
-                    .w(px(110.))
-                    .text_color(theme.muted_foreground)
-                    .child(size),
-            )
-            .child(
-                div()
-                    .w(px(70.))
-                    .text_color(theme.muted_foreground)
-                    .child(file),
-            )
-            .child(
-                div()
-                    .w(px(110.))
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(tags.join(" · ")),
-            )
-            .child(div().w(px(20.)).when(self.is_copied(&key), |d| {
-                d.child(Icon::new(IconName::RefreshCw).small().text_color(hsla(
-                    96. / 360.,
-                    0.62,
-                    0.55,
-                    1.,
-                )))
-            }))
-            .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
-                this.click_tile(pos, ev.modifiers(), ev.click_count());
-                window.focus(&this.focus, cx);
-                cx.notify();
-            }))
-            .into_any_element()
-    }
-
     /// Click, Ctrl+click, Shift+click selection (PLAN §6). A double-click
     /// opens the item in the system viewer.
-    fn click_tile(&mut self, pos: usize, mods: Modifiers, clicks: usize) {
+    pub(crate) fn click_tile(&mut self, pos: usize, mods: Modifiers, clicks: usize) {
         let Some(&idx) = self.visible.get(pos) else {
             return;
         };

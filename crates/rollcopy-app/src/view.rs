@@ -179,6 +179,8 @@ pub struct MainView {
     pub(crate) revealed: HashSet<String>,
     /// List view (no thumbnails) instead of the grid.
     pub(crate) list_view: bool,
+    /// List column widths (see `list::COLUMNS`).
+    pub(crate) list_widths: Vec<f32>,
     /// Copy settings the copied state in `in_dest` was worked out for.
     pub(crate) copied_for: Option<rollcopy_queue::Settings>,
     /// Bumped per copied-state scan; older scans' results are dropped.
@@ -321,6 +323,7 @@ impl MainView {
             full: HashMap::new(),
             revealed: HashSet::new(),
             list_view: saved_ui.list_view,
+            list_widths: crate::list::widths_from(&saved_ui.list_columns),
             copied_for: None,
             copied_gen: 0,
             image_dims: HashMap::new(),
@@ -1557,7 +1560,9 @@ impl MainView {
         };
         let (preview, expanded) = (self.preview_w, self.transfers.expanded);
         let list_view = self.list_view;
+        let list_columns = self.list_widths.clone();
         Prefs::update_ui(cx, |ui| {
+            ui.list_columns = list_columns;
             ui.window = Some(saved);
             ui.preview_width = preview;
             ui.transfers_expanded = expanded;
