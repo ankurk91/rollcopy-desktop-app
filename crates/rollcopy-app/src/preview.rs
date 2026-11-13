@@ -299,6 +299,7 @@ fn info_rows(
         ));
     }
 
+    let map_link = a.location.map(|(lat, lon)| google_maps_url(lat, lon));
     v_flex()
         .gap_1()
         .text_sm()
@@ -317,6 +318,16 @@ fn info_rows(
                         .child(k.to_owned()),
                 )
                 .child(div().flex_1().min_w_0().child(v))
+                .when_some(map_link.clone().filter(|_| k == "Location"), |d, url| {
+                    d.child(
+                        btn("open-map")
+                            .xsmall()
+                            .ghost()
+                            .icon(IconName::MapPin)
+                            .tooltip("Open in Google Maps (in your browser)")
+                            .on_click(move |_, _, cx| cx.open_url(&url)),
+                    )
+                })
                 .when(copyable, |d| {
                     d.child(
                         btn(SharedString::from(format!("copy-{k}")))
@@ -334,6 +345,12 @@ fn info_rows(
         }))
 }
 
+/// A Google Maps link that drops a pin at these coordinates. Opened in the
+/// browser only when the user clicks; Rollcopy itself sends nothing.
+pub(crate) fn google_maps_url(lat: f64, lon: f64) -> String {
+    format!("https://www.google.com/maps/search/?api=1&query={lat:.6},{lon:.6}")
+}
+
 fn human_size(bytes: u64) -> String {
     let b = bytes as f64;
     if b >= 1e9 {
@@ -347,7 +364,19 @@ fn human_size(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::human_size;
+    use super::{google_maps_url, human_size};
+
+    #[test]
+    fn maps_link() {
+        assert_eq!(
+            google_maps_url(51.500_7, -0.124_6),
+            "https://www.google.com/maps/search/?api=1&query=51.500700,-0.124600"
+        );
+        assert_eq!(
+            google_maps_url(-33.86, 151.21),
+            "https://www.google.com/maps/search/?api=1&query=-33.860000,151.210000"
+        );
+    }
 
     #[test]
     fn sizes() {

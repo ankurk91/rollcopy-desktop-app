@@ -26,7 +26,7 @@ on the way.
   entries, never in "All media". Even then, Hidden items stay blurred until you click the 👁 on
   each one.
 - **Details for each item**: date and time zone, size, camera and lens, the app that saved it
-  (Camera, WhatsApp, Snapchat, …), place name, location, albums.
+  (Camera, WhatsApp, Snapchat, …), place name, location (open it in Google Maps), albums.
 - **Android/PC-friendly copies**:
   - HEIC → JPG (keeps colour profile and EXIF, applies rotation)
   - MOV → MP4 (lossless by default; optional H.264 re-encode for old devices, using the GPU through
@@ -53,7 +53,8 @@ connecting to a Mac or PC.
 ### Network use
 
 None, except **Check for updates** (manual, or optionally once a day), which asks GitHub for the
-latest release. Nothing is uploaded.
+latest release. Nothing is uploaded. The 📍 button next to a photo's location opens Google Maps in
+your browser, only when you click it.
 
 ## Requirements
 
