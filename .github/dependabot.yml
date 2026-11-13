@@ -1,11 +1,14 @@
-# Keeps the SHA-pinned GitHub Actions and the Cargo dependencies current,
-# one grouped pull request per ecosystem.
+# One grouped pull request per ecosystem, once a month on the 15th. The
+# cooldown skips releases younger than two weeks.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: cron
+      cronjob: "0 6 15 * *"
+    cooldown:
+      default-days: 14
     groups:
       actions:
         patterns: ["*"]
@@ -13,7 +16,10 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: monthly
+      interval: cron
+      cronjob: "0 6 15 * *"
+    cooldown:
+      default-days: 14
     groups:
       cargo:
         patterns: ["*"]

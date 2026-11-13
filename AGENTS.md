@@ -23,7 +23,6 @@ packaging/               .desktop file, icon, install script, AppImage/deb helpe
 cargo fmt --all
 cargo clippy --workspace --all-targets --locked -- -D warnings   # lint policy: [workspace.lints]
 cargo test --workspace --locked
-cargo deny check                          # advisories, licences (deny.toml)
 cargo run -p rollcopy-app                 # the app
 cargo run -p rollcopy-cli -- info         # needs a connected, trusted iPhone
 ```
