@@ -246,6 +246,8 @@ pub async fn load(session: &Session, cache_dir: &Path) -> Result<Library, Device
         Err(reason) => (scan_dcim(&mut fs).await?, Source::DcimScan { reason }),
     };
 
+    // Names become local paths: drop anything that isn't a plain name.
+    assets.retain(Asset::has_safe_names);
     let dirs: BTreeSet<String> = assets.iter().map(|a| a.directory.clone()).collect();
     let edits = scan_edits(&mut fs, &dirs).await?;
     apply_edits(&mut assets, &edits);

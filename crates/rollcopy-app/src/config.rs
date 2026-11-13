@@ -178,9 +178,16 @@ pub fn default_base_folder() -> PathBuf {
 pub fn safe_folder_name(name: &str) -> String {
     let s: String = name
         .chars()
-        .map(|c| if c == '/' || c == '\0' { '_' } else { c })
+        .map(|c| {
+            if c == '/' || c == '\\' || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
-    if s.trim().is_empty() {
+    // "." or ".." would point at the base folder or its parent.
+    if s.trim().is_empty() || s.trim().chars().all(|c| c == '.') {
         "iPhone".to_owned()
     } else {
         s
@@ -362,6 +369,8 @@ mod tests {
         assert_eq!(c.destination_for("U", "x"), PathBuf::from("/elsewhere"));
         assert_eq!(safe_folder_name("a/b"), "a_b");
         assert_eq!(safe_folder_name(" "), "iPhone");
+        assert_eq!(safe_folder_name(".."), "iPhone");
+        assert_eq!(safe_folder_name("My\tiPhone\\x"), "My_iPhone_x");
     }
 
     #[test]

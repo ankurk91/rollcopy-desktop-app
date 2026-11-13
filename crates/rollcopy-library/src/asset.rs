@@ -85,6 +85,17 @@ impl Asset {
         format!("/{}/{}", self.directory, self.filename)
     }
 
+    /// Whether the folder and file name are plain relative names. They end
+    /// up in local paths (destination, thumbnail cache), so a damaged or
+    /// hostile database must not be able to use `..`, absolute paths or
+    /// stray separators to write elsewhere.
+    pub fn has_safe_names(&self) -> bool {
+        let plain = |c: &str| !c.is_empty() && c != "." && c != ".." && !c.contains(['\0', '\\']);
+        plain(&self.filename)
+            && !self.filename.contains('/')
+            && self.directory.split('/').all(plain)
+    }
+
     /// File name without extension (`IMG_0057`).
     pub fn stem(&self) -> &str {
         self.filename
@@ -221,5 +232,26 @@ mod tests {
         let a = Asset::new("DCIM/100APPLE", "IMG_0057.HEIC", MediaKind::Photo);
         assert_eq!(a.stem(), "IMG_0057");
         assert_eq!(a.device_path(), "/DCIM/100APPLE/IMG_0057.HEIC");
+    }
+
+    #[test]
+    fn only_plain_names_are_safe() {
+        let ok = Asset::new("DCIM/100APPLE", "IMG_0001.HEIC", MediaKind::Photo);
+        assert!(ok.has_safe_names());
+        for (dir, file) in [
+            ("DCIM/100APPLE", "../../.bashrc"),
+            ("DCIM/../../..", "IMG_0001.HEIC"),
+            ("/etc", "IMG_0001.HEIC"),
+            ("DCIM//100APPLE", "IMG_0001.HEIC"),
+            ("DCIM/100APPLE", ".."),
+            ("DCIM/100APPLE", "a/b.JPG"),
+            ("DCIM/100APPLE", "a\\b.JPG"),
+            ("DCIM/100APPLE", ""),
+        ] {
+            assert!(
+                !Asset::new(dir, file, MediaKind::Photo).has_safe_names(),
+                "{dir} {file}"
+            );
+        }
     }
 }
