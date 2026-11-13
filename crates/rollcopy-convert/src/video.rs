@@ -6,8 +6,10 @@
 //! configuration unless `-strict unofficial` is given, so the result is
 //! plain HLG HEVC, which more players handle.
 
+use std::io::Read;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::ConvertError;
 
@@ -46,23 +48,86 @@ fn tool_ok(name: &str) -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-fn run(cmd: &mut Command, what: &str) -> Result<String, ConvertError> {
-    let out = cmd.output().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            ConvertError::ToolMissing(what.to_owned())
-        } else {
-            ConvertError::Io(e)
+/// Time limit for one ffprobe call.
+const PROBE_LIMIT: Duration = Duration::from_secs(60);
+
+/// Time limit for converting a video of `secs` seconds (audit REL-05).
+/// Generous: a remux runs far faster than real time, and software H.264
+/// with tone-mapping took about 3× real time on the test laptop.
+fn convert_limit(mode: VideoMode, secs: f64) -> Duration {
+    let secs = if secs.is_finite() { secs.max(0.0) } else { 0.0 };
+    match mode {
+        VideoMode::Remux => Duration::from_secs_f64((4.0 * secs).max(120.0)),
+        VideoMode::H264 => Duration::from_secs_f64((20.0 * secs).max(600.0)),
+    }
+}
+
+/// Runs a tool, killing it if it takes longer than `limit`. Returns stdout.
+fn run(cmd: &mut Command, what: &str, limit: Duration) -> Result<String, ConvertError> {
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                ConvertError::ToolMissing(what.to_owned())
+            } else {
+                ConvertError::Io(e)
+            }
+        })?;
+    // Drain both pipes on their own threads so a chatty tool can't block.
+    let drain = |r: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut r) = r {
+                let _ = r.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let stdout = drain(
+        child
+            .stdout
+            .take()
+            .map(|r| Box::new(r) as Box<dyn Read + Send>),
+    );
+    let stderr = drain(
+        child
+            .stderr
+            .take()
+            .map(|r| Box::new(r) as Box<dyn Read + Send>),
+    );
+
+    let deadline = Instant::now() + limit;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break Some(status);
         }
-    })?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let out = stdout.join().unwrap_or_default();
+    let err = stderr.join().unwrap_or_default();
+    let Some(status) = status else {
+        return Err(ConvertError::Tool {
+            tool: what.to_owned(),
+            message: format!("stopped after {} s without finishing", limit.as_secs()),
+        });
+    };
+    if !status.success() {
+        let err = String::from_utf8_lossy(&err);
         let tail: Vec<&str> = err.lines().rev().take(5).collect();
         return Err(ConvertError::Tool {
             tool: what.to_owned(),
             message: tail.into_iter().rev().collect::<Vec<_>>().join("\n"),
         });
     }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    Ok(String::from_utf8_lossy(&out).into_owned())
 }
 
 /// Reads codec, size, duration and HDR flag with `ffprobe`.
@@ -74,6 +139,7 @@ pub fn probe(path: &Path) -> Result<VideoInfo, ConvertError> {
             .args(["-of", "flat"])
             .arg(path),
         "ffprobe",
+        PROBE_LIMIT,
     )?;
     parse_probe(&out)
 }
@@ -147,7 +213,7 @@ pub fn to_mp4(src: &Path, dst: &Path, mode: VideoMode) -> Result<(), ConvertErro
     }
     cmd.args(["-movflags", "+faststart+use_metadata_tags", "-f", "mp4"])
         .arg(dst);
-    run(&mut cmd, "ffmpeg")?;
+    run(&mut cmd, "ffmpeg", convert_limit(mode, info.duration_secs))?;
     Ok(())
 }
 
@@ -167,6 +233,59 @@ pub fn verify_mp4(path: &Path, expected_secs: f64) -> Result<VideoInfo, ConvertE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_tool_is_stopped() {
+        let start = Instant::now();
+        let err = run(
+            Command::new("sleep").arg("30"),
+            "sleep",
+            Duration::from_millis(300),
+        )
+        .unwrap_err();
+        assert!(start.elapsed() < Duration::from_secs(5));
+        assert!(err.to_string().contains("without finishing"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_and_failures_come_back() {
+        let out = run(
+            Command::new("sh").args(["-c", "echo hi; echo oops >&2"]),
+            "sh",
+            Duration::from_secs(10),
+        )
+        .unwrap();
+        assert_eq!(out.trim(), "hi");
+        let err = run(
+            Command::new("sh").args(["-c", "echo bad >&2; exit 3"]),
+            "sh",
+            Duration::from_secs(10),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("bad"), "{err}");
+    }
+
+    #[test]
+    fn limits_scale_with_length() {
+        assert_eq!(
+            convert_limit(VideoMode::Remux, 10.0),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            convert_limit(VideoMode::Remux, 60.0),
+            Duration::from_secs(240)
+        );
+        assert_eq!(
+            convert_limit(VideoMode::H264, 60.0),
+            Duration::from_secs(1200)
+        );
+        assert_eq!(
+            convert_limit(VideoMode::H264, f64::NAN),
+            Duration::from_secs(600)
+        );
+    }
 
     #[test]
     fn parses_flat_probe() {

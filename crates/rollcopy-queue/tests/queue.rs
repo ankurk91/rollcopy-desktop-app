@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -20,6 +21,10 @@ const UDID: &str = "00000000-0000000000000000";
 #[derive(Clone, Default)]
 struct FakePhone {
     files: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    /// Reads that fail as if the cable dropped, while the phone stays listed.
+    fail_reads: Arc<Mutex<usize>>,
+    /// Reads hang (a wedged phone).
+    hang: Arc<AtomicBool>,
 }
 
 impl FakePhone {
@@ -64,6 +69,18 @@ impl MediaRead for FakeMedia {
             .get(path)
             .cloned()
             .ok_or_else(|| DeviceError::NotFound(path.to_owned()))?;
+        {
+            let mut fails = self.0.fail_reads.lock().unwrap();
+            if *fails > 0 {
+                *fails -= 1;
+                return Err(DeviceError::Disconnected("cable wiggled".into()));
+            }
+        }
+        if self.0.hang.load(Ordering::SeqCst) {
+            // Partly written, then nothing.
+            tokio::fs::write(dest, b"half").await?;
+            std::future::pending::<()>().await;
+        }
         // Slow enough that two jobs overlap.
         tokio::time::sleep(Duration::from_millis(20)).await;
         tokio::fs::write(dest, &data).await?;
@@ -242,6 +259,124 @@ async fn recopy_follows_the_conflict_policy() {
     assert_eq!(path, dest.path().join("IMG_0057.JPG"));
     assert_eq!(std::fs::read(&path).unwrap(), b"v2");
     assert!(!dest.path().join("IMG_0057 (2).JPG").exists());
+}
+
+/// Audit REL-04: a read fails while the phone stays listed. The queue
+/// pauses, reconnects on its own and finishes, with no new `DeviceReady`.
+#[tokio::test]
+async fn resumes_after_a_dropped_read_without_a_replug() {
+    let dest = tempfile::tempdir().unwrap();
+    let mut s = Settings::new(dest.path().to_path_buf());
+    s.layout = Layout::Flat;
+    let phone = FakePhone::with(&[("/DCIM/100APPLE/IMG_0001.JPG", b"photo")]);
+    *phone.fail_reads.lock().unwrap() = 1;
+    let mut h = Harness::start(phone, s);
+    h.add(vec![photo("DCIM/100APPLE", "IMG_0001.JPG", 1_700_000_000)]);
+
+    let mut paused = false;
+    let mut finished = None;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while finished.is_none() {
+            match h.events.recv().await.unwrap() {
+                QueueEvent::Paused { reason: Some(_) } => paused = true,
+                QueueEvent::State { state, .. } if state.is_finished() => finished = Some(state),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("queue stayed paused");
+    assert!(paused);
+    assert_eq!(finished, Some(JobState::Done));
+    assert_eq!(
+        std::fs::read(dest.path().join("IMG_0001.JPG")).unwrap(),
+        b"photo"
+    );
+}
+
+/// Audit REL-05: a running job can be cancelled; its temp file goes away.
+#[tokio::test]
+async fn cancel_stops_a_hung_job_and_cleans_up() {
+    let dest = tempfile::tempdir().unwrap();
+    let mut s = Settings::new(dest.path().to_path_buf());
+    s.layout = Layout::Flat;
+    let phone = FakePhone::with(&[
+        ("/DCIM/100APPLE/IMG_0001.JPG", b"one"),
+        ("/DCIM/100APPLE/IMG_0002.JPG", b"two"),
+        ("/DCIM/100APPLE/IMG_0003.JPG", b"three"),
+    ]);
+    phone.hang.store(true, Ordering::SeqCst);
+    let mut h = Harness::start(phone, s);
+    h.add(vec![
+        photo("DCIM/100APPLE", "IMG_0001.JPG", 1_700_000_000),
+        photo("DCIM/100APPLE", "IMG_0002.JPG", 1_700_000_100),
+        photo("DCIM/100APPLE", "IMG_0003.JPG", 1_700_000_200),
+    ]);
+    // Wait until both workers are stuck mid-read.
+    let parts = |d: &Path| {
+        walk(d)
+            .iter()
+            .filter(|p| p.to_string_lossy().ends_with(".part"))
+            .count()
+    };
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while parts(dest.path()) < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("jobs never started");
+
+    h.queue.send(QueueCommand::CancelAll);
+    let done = h.finish(3).await;
+    assert!(
+        done.values().all(|(s, _)| *s == JobState::Cancelled),
+        "{done:?}"
+    );
+    // Temp files go with the cancelled tasks.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(walk(dest.path()), Vec::<PathBuf>::new());
+}
+
+/// Audit REL-06: not enough space pauses the queue instead of failing items.
+#[tokio::test]
+async fn full_disk_pauses_instead_of_failing() {
+    let dest = tempfile::tempdir().unwrap();
+    let mut s = Settings::new(dest.path().to_path_buf());
+    s.layout = Layout::Flat;
+    let phone = FakePhone::with(&[("/DCIM/100APPLE/IMG_0001.JPG", b"photo")]);
+    let mut h = Harness::start(phone, s);
+    let mut big = photo("DCIM/100APPLE", "IMG_0001.JPG", 1_700_000_000);
+    // Larger than any disk.
+    big.original_size = Some(1 << 60);
+    h.add(vec![big]);
+
+    let reason = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match h.events.recv().await.unwrap() {
+                QueueEvent::Paused { reason: Some(r) } => return r,
+                QueueEvent::State { state, .. } if state.is_finished() => {
+                    panic!("job finished: {state:?}")
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(reason.contains("disk is full"), "{reason}");
+    // Resume tries again, and pauses again while there's still no room.
+    h.queue.send(QueueCommand::Resume);
+    let again = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let QueueEvent::Paused { reason: Some(r) } = h.events.recv().await.unwrap() {
+                return r;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(again.contains("disk is full"), "{again}");
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {

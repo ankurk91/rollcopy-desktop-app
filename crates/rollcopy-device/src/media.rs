@@ -7,6 +7,24 @@ use tokio::io::AsyncWriteExt;
 
 use crate::error::{DeviceError, Result};
 
+/// Longest wait for one AFC open, read or close during a copy. A phone that
+/// stops answering counts as disconnected, so the queue pauses instead of
+/// holding a worker for good (audit REL-05).
+const IO_TIMEOUT: Duration = Duration::from_secs(30);
+
+async fn deadline<T>(
+    what: &str,
+    fut: impl Future<Output = std::result::Result<T, idevice::IdeviceError>>,
+) -> Result<T> {
+    match tokio::time::timeout(IO_TIMEOUT, fut).await {
+        Ok(r) => r.map_err(DeviceError::from),
+        Err(_) => Err(DeviceError::Disconnected(format!(
+            "{what} timed out after {} s",
+            IO_TIMEOUT.as_secs()
+        ))),
+    }
+}
+
 /// Bytes requested per AFC read. idevice splits larger requests into its own
 /// maximum transfer size; 1 MiB keeps round trips low without much memory.
 const READ_CHUNK: usize = 1 << 20;
@@ -147,15 +165,14 @@ impl MediaFs {
         dest: &Path,
         mut progress: impl FnMut(u64),
     ) -> Result<u64> {
-        let mut f = self
-            .afc
-            .open(path, AfcFopenMode::RdOnly)
-            .await
-            .map_err(not_found_as(path))?;
+        let mut f = match deadline("open", self.afc.open(path, AfcFopenMode::RdOnly)).await {
+            Err(DeviceError::NotFound(_)) => return Err(DeviceError::NotFound(path.to_owned())),
+            other => other?,
+        };
         let mut out = tokio::fs::File::create(dest).await?;
         let mut total = 0u64;
         loop {
-            let chunk = f.read_n(READ_CHUNK).await?;
+            let chunk = deadline("read", f.read_n(READ_CHUNK)).await?;
             if chunk.is_empty() {
                 break;
             }
@@ -165,7 +182,7 @@ impl MediaFs {
         }
         out.flush().await?;
         out.sync_all().await?;
-        f.close().await?;
+        deadline("close", f.close()).await?;
         Ok(total)
     }
 }

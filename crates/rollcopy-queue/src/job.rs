@@ -77,6 +77,55 @@ fn staging_path(dir: &Path, ext: &str) -> PathBuf {
     dir.join(format!("{}.{ext}", unique_tag()))
 }
 
+/// Deletes `.rollcopy-<pid>-…part` files in `dir` left by a Rollcopy that
+/// crashed or was killed (audit REL-09). Files of a process that is still
+/// running are kept. Each folder is checked once per session.
+pub(crate) fn sweep_orphans(dir: &Path) {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    static SWEPT: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
+    {
+        let mut swept = SWEPT.lock().unwrap_or_else(|e| e.into_inner());
+        if !swept
+            .get_or_insert_with(HashSet::new)
+            .insert(dir.to_path_buf())
+        {
+            return;
+        }
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        if let Some(pid) = orphan_pid(&name)
+            && pid != std::process::id()
+            && !process_alive(pid)
+        {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// The process id in a `.rollcopy-<pid>-<n>-<name>.part` file name.
+fn orphan_pid(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix(".rollcopy-")?;
+    if !name.ends_with(".part") {
+        return None;
+    }
+    rest.split('-').next()?.parse().ok()
+}
+
+fn process_alive(pid: u32) -> bool {
+    if cfg!(target_os = "linux") {
+        Path::new(&format!("/proc/{pid}")).exists()
+    } else {
+        // Can't tell; keep the file.
+        true
+    }
+}
+
 /// The temporary file a job writes next to its destination:
 /// `.rollcopy-<pid>-<n>-<name>.part`. Never shared with another job, even one
 /// with the same destination (audit REL-02).
@@ -130,6 +179,8 @@ async fn run_inner(
         tokio::fs::create_dir_all(dir)
             .await
             .map_err(|e| failed(Stage::Write, e))?;
+        let dir = dir.to_path_buf();
+        let _ = tokio::task::spawn_blocking(move || sweep_orphans(&dir)).await;
     }
     tokio::fs::create_dir_all(&spec.staging_dir)
         .await
@@ -292,6 +343,24 @@ mod tests {
         let name = a.file_name().unwrap().to_string_lossy().into_owned();
         assert!(name.starts_with(&format!("{}-", std::process::id())));
         assert!(name.ends_with(".heic"));
+    }
+
+    #[test]
+    fn orphans_of_dead_processes_are_swept() {
+        let dir = tempfile::tempdir().unwrap();
+        // A pid that can't be running (above the Linux maximum).
+        let dead = dir.path().join(".rollcopy-99999999-1-IMG_1.JPG.part");
+        let ours = part_path(&dir.path().join("IMG_2.JPG"));
+        let photo = dir.path().join("IMG_3.JPG");
+        let lookalike = dir.path().join(".rollcopy-notes.txt");
+        for p in [&dead, &ours, &photo, &lookalike] {
+            std::fs::write(p, b"x").unwrap();
+        }
+        sweep_orphans(dir.path());
+        assert!(!dead.exists());
+        assert!(ours.exists() && photo.exists() && lookalike.exists());
+        assert_eq!(orphan_pid(".rollcopy-42-7-IMG_1.JPG.part"), Some(42));
+        assert_eq!(orphan_pid("IMG_1.JPG.part"), None);
     }
 
     #[test]

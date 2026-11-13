@@ -14,3 +14,6 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # iOS 27 HEICs tested ("Non-existing item ID referenced", portrait/depth photos).
 libheif-rs = { version = "=3.0.0", default-features = false, features = ["embedded-libheif", "v1_23"] }
 thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

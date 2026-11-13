@@ -126,7 +126,7 @@ The app always shows exactly one clear next step. Each state is detected, not gu
      Ready → read device info → read the Photos library
 ```
 
-**During a copy:** if the phone locks or the cable drops, AFC returns I/O errors. Seen on 2026-10-19. The queue then **pauses** and shows "Unlock your iPhone / reconnect". It doesn't record a pile of failures. When the device comes back, the queue resumes from where it stopped.
+**During a copy:** if the phone locks or the cable drops, AFC returns I/O errors. Seen on 2026-10-19. The queue then **pauses** and shows "Unlock your iPhone / reconnect". It doesn't record a pile of failures. When the device comes back, the queue resumes from where it stopped. If the phone never left usbmuxd's list (a short cable glitch), the queue tries to reconnect every 2 s and resumes on its own; *Resume* also retries straight away (audit REL-04). Each AFC open, read or close during a copy gives up after 30 s and counts as a disconnect, so a wedged phone pauses the queue instead of holding a worker (REL-05).
 
 **Locked phone (tested 2026-11-12):** once the phone is trusted and has been unlocked at least once since it started, AFC keeps working while it's locked. Listing, reading a HEIC and reading `Photos.sqlite` all succeeded. So "Unlock your iPhone" is only shown when the phone actually refuses: before the first unlock after a restart, or while waiting for Trust. The app shouldn't nag about the lock screen otherwise. It's not yet known whether the 2026-10-19 I/O errors came from auto-lock or from a bad cable like the one seen today. **M4 must test a long copy with the phone locked.** Until then, the queue keeps pausing on disconnect.
 
@@ -251,7 +251,8 @@ These are the rules proven in the manual transfer, turned into code.
    - The queue pauses on that item until you answer. Other non-conflicting items keep copying.
    - Preference "When a file already exists": **Ask** (default) / Always skip / Always overwrite.
    - There's no per-device "copied" database. ✓ badges and conflicts come from what's actually in the destination folder (the file and its modified time), so they stay correct if you move or delete files there. A copy whose modified time was changed by another program counts as not copied, and copying again makes a `(2)` file next to it rather than replacing it.
-7. **Concurrency:** 2 AFC reads at once, plus 1–2 conversion workers. Never more than 1 ffmpeg per CPU core.
+7. **Limits and cancelling** (audit 2026-11-13). ffprobe gets 60 s. ffmpeg gets max(120 s, 4× the clip length) for a remux and max(600 s, 20×) for H.264; then it's killed and the item fails. Queued or running items can be cancelled one by one or all at once; a cancelled job's temporary files are removed. Before each item, and after any failure, free space is checked: the destination needs the item's size (twice that when converting) plus 64 MB, and the cache needs the original when converting. Too little pauses the queue with "The destination disk is full" rather than failing every item (REL-06). A crash can still leave a `.rollcopy-<pid>-…part` file; the first job writing to that folder later deletes those whose process is gone (REL-09).
+8. **Concurrency:** 2 AFC reads at once, plus 1–2 conversion workers. Never more than 1 ffmpeg per CPU core.
 
 ## 8. Error tracking
 

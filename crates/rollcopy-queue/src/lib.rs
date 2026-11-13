@@ -8,6 +8,7 @@ mod history;
 mod job;
 mod layout;
 mod queue;
+mod space;
 
 pub use history::{FailureRecord, History};
 pub use layout::{

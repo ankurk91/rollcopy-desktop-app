@@ -3,13 +3,14 @@
 //! once, and records failures.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use rollcopy_device::{DeviceError, MediaFs, MediaRead, Session};
 use rollcopy_library::Asset;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::task::AbortHandle;
 
 use crate::history::{FailureRecord, History};
 use crate::job::{self, JobError, JobSpec};
@@ -22,6 +23,9 @@ pub type JobId = u64;
 const WORKERS: usize = 2;
 /// Automatic retries for a real per-file failure before it is left to the user.
 const AUTO_RETRIES: u32 = 1;
+/// After a read fails while the phone is still listed, try to reconnect this
+/// often (audit REL-04).
+const PROBE_EVERY: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
@@ -52,6 +56,8 @@ pub enum JobState {
     /// Done, replacing a file that was already there.
     Overwritten,
     Skipped,
+    /// Removed from the queue by the user before it finished.
+    Cancelled,
     Failed {
         stage: Stage,
         error: String,
@@ -64,7 +70,11 @@ impl JobState {
     pub fn is_finished(&self) -> bool {
         matches!(
             self,
-            JobState::Done | JobState::Overwritten | JobState::Skipped | JobState::Failed { .. }
+            JobState::Done
+                | JobState::Overwritten
+                | JobState::Skipped
+                | JobState::Cancelled
+                | JobState::Failed { .. }
         )
     }
 }
@@ -87,12 +97,18 @@ pub enum QueueCommand {
     },
     Retry(JobId),
     RetryAllFailed,
+    /// Stop a queued or running job; its temporary files are removed.
+    Cancel(JobId),
+    /// Cancel every job that hasn't finished.
+    CancelAll,
     Pause,
+    /// Continue after a pause of any kind. If the phone or disk still has a
+    /// problem, the queue simply pauses again.
     Resume,
     /// The phone with this UDID is connected and trusted.
     DeviceReady(String),
     DeviceGone,
-    /// Forget finished jobs (Done/Skipped/Overwritten).
+    /// Forget finished jobs (Done/Skipped/Overwritten/Cancelled).
     ClearFinished,
 }
 
@@ -192,13 +208,15 @@ pub fn spawn_with<O: Opener>(
     let manager = Manager {
         opener: Arc::new(opener),
         reserved: HashMap::new(),
+        probe: None,
+        space_paused: None,
         settings,
         staging_dir,
         history,
         events,
         jobs: HashMap::new(),
         pending: VecDeque::new(),
-        running: HashSet::new(),
+        running: HashMap::new(),
         conflicts: VecDeque::new(),
         shown_conflict: None,
         conflict_default: None,
@@ -233,13 +251,18 @@ struct Manager<O: Opener> {
     /// Destinations of unfinished jobs, so two items never get the same file
     /// (audit REL-01/02).
     reserved: HashMap<PathBuf, JobId>,
+    /// Reconnect attempts after a failed read (audit REL-04).
+    probe: Option<AbortHandle>,
+    /// Not enough free space (audit REL-06).
+    space_paused: Option<String>,
     settings: Settings,
     staging_dir: PathBuf,
     history: Option<History>,
     events: UnboundedSender<QueueEvent>,
     jobs: HashMap<JobId, Job>,
     pending: VecDeque<JobId>,
-    running: HashSet<JobId>,
+    /// Running jobs and the handles that cancel them.
+    running: HashMap<JobId, AbortHandle>,
     conflicts: VecDeque<JobId>,
     shown_conflict: Option<JobId>,
     /// "Do this for all": answer for further conflicts until the queue idles.
@@ -255,11 +278,15 @@ struct Manager<O: Opener> {
 impl<O: Opener> Manager<O> {
     async fn run(mut self, mut rx: UnboundedReceiver<QueueCommand>) {
         let (done_tx, mut done_rx) = mpsc::unbounded_channel::<Done<O::Media>>();
+        let (probe_tx, mut probe_rx) = mpsc::unbounded_channel::<(String, O::Media)>();
         loop {
             self.dispatch(&done_tx);
             self.show_conflict();
             if self.idle() {
                 self.conflict_default = None;
+            }
+            if self.device_paused.is_some() && self.probe.is_none() {
+                self.start_probe(&probe_tx);
             }
             tokio::select! {
                 cmd = rx.recv() => match cmd {
@@ -267,7 +294,56 @@ impl<O: Opener> Manager<O> {
                     None => return,
                 },
                 Some(done) = done_rx.recv() => self.finished(done),
+                Some((udid, media)) = probe_rx.recv() => self.probe_succeeded(udid, media),
             }
+        }
+    }
+
+    /// While the phone is listed but reads fail, keeps trying to open it, so
+    /// the queue resumes without a re-plug (audit REL-04). Only runs when
+    /// the paused jobs' phone is the ready one; otherwise `DeviceReady` will
+    /// come when it's back.
+    fn start_probe(&mut self, tx: &UnboundedSender<(String, O::Media)>) {
+        let Some(udid) = self.ready_udid.clone() else {
+            return;
+        };
+        let wanted = self
+            .pending
+            .front()
+            .and_then(|id| self.jobs.get(id))
+            .is_some_and(|j| j.udid == udid);
+        if !wanted {
+            return;
+        }
+        let (opener, tx) = (self.opener.clone(), tx.clone());
+        let task = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(PROBE_EVERY).await;
+                if let Ok(media) = opener.open(&udid).await {
+                    let _ = tx.send((udid, media));
+                    return;
+                }
+            }
+        });
+        self.probe = Some(task.abort_handle());
+    }
+
+    fn stop_probe(&mut self) {
+        if let Some(p) = self.probe.take() {
+            p.abort();
+        }
+    }
+
+    fn probe_succeeded(&mut self, udid: String, media: O::Media) {
+        self.probe = None;
+        if self.ready_udid.as_deref() != Some(&udid) {
+            return;
+        }
+        self.conns.push((udid, media));
+        if self.device_paused.take().is_some() {
+            self.emit(QueueEvent::Paused {
+                reason: self.pause_reason(),
+            });
         }
     }
 
@@ -292,7 +368,27 @@ impl<O: Opener> Manager<O> {
     fn pause_reason(&self) -> Option<String> {
         self.device_paused
             .clone()
+            .or_else(|| self.space_paused.clone())
             .or_else(|| self.user_paused.then(|| "Paused".to_owned()))
+    }
+
+    fn cancel(&mut self, id: JobId) {
+        let Some(job) = self.jobs.get(&id) else {
+            return;
+        };
+        if job.state.is_finished() {
+            return;
+        }
+        // Dropping the task removes its temporary files.
+        if let Some(handle) = self.running.remove(&id) {
+            handle.abort();
+        }
+        self.pending.retain(|p| *p != id);
+        self.conflicts.retain(|c| *c != id);
+        if self.shown_conflict == Some(id) {
+            self.shown_conflict = None;
+        }
+        self.set_state(id, JobState::Cancelled);
     }
 
     fn command(&mut self, cmd: QueueCommand) {
@@ -332,13 +428,33 @@ impl<O: Opener> Manager<O> {
                     reason: self.pause_reason(),
                 });
             }
+            QueueCommand::Cancel(id) => self.cancel(id),
+            QueueCommand::CancelAll => {
+                let mut ids: Vec<JobId> = self
+                    .jobs
+                    .iter()
+                    .filter(|(_, j)| !j.state.is_finished())
+                    .map(|(id, _)| *id)
+                    .collect();
+                ids.sort_unstable();
+                for id in ids {
+                    self.cancel(id);
+                }
+            }
             QueueCommand::Resume => {
                 self.user_paused = false;
+                self.space_paused = None;
+                if self.device_paused.take().is_some() {
+                    // Start afresh: reconnect instead of reusing old links.
+                    self.conns.clear();
+                    self.stop_probe();
+                }
                 self.emit(QueueEvent::Paused {
                     reason: self.pause_reason(),
                 });
             }
             QueueCommand::DeviceReady(udid) => {
+                self.stop_probe();
                 self.ready_udid = Some(udid);
                 if self.device_paused.take().is_some() {
                     self.emit(QueueEvent::Paused {
@@ -347,6 +463,7 @@ impl<O: Opener> Manager<O> {
                 }
             }
             QueueCommand::DeviceGone => {
+                self.stop_probe();
                 self.ready_udid = None;
                 self.conns.clear();
             }
@@ -357,7 +474,10 @@ impl<O: Opener> Manager<O> {
                     .filter(|(_, j)| {
                         matches!(
                             j.state,
-                            JobState::Done | JobState::Overwritten | JobState::Skipped
+                            JobState::Done
+                                | JobState::Overwritten
+                                | JobState::Skipped
+                                | JobState::Cancelled
                         )
                     })
                     .map(|(id, _)| *id)
@@ -505,6 +625,16 @@ impl<O: Opener> Manager<O> {
                 }
             }
 
+            // Enough room for this item? (audit REL-06)
+            if let Some(problem) = space_problem(&job.dest, &self.staging_dir, &job.asset) {
+                self.pending.push_front(id);
+                self.space_paused = Some(problem);
+                self.emit(QueueEvent::Paused {
+                    reason: self.pause_reason(),
+                });
+                break;
+            }
+
             let spec = JobSpec {
                 id,
                 asset: job.asset.clone(),
@@ -519,10 +649,9 @@ impl<O: Opener> Manager<O> {
                 .iter()
                 .position(|(u, _)| *u == udid)
                 .map(|i| self.conns.swap_remove(i).1);
-            self.running.insert(id);
             let (events, done_tx) = (self.events.clone(), done_tx.clone());
             let opener = self.opener.clone();
-            tokio::spawn(async move {
+            let task = tokio::spawn(async move {
                 let mut fs = match conn {
                     Some(fs) => fs,
                     None => match opener.open(&udid).await {
@@ -550,11 +679,15 @@ impl<O: Opener> Manager<O> {
                 let conn = result.is_ok().then_some((udid, fs));
                 let _ = done_tx.send(Done { id, result, conn });
             });
+            self.running.insert(id, task.abort_handle());
         }
     }
 
     fn finished(&mut self, done: Done<O::Media>) {
-        self.running.remove(&done.id);
+        if self.running.remove(&done.id).is_none() {
+            // Cancelled while it was finishing.
+            return;
+        }
         if let Some(conn) = done.conn {
             self.conns.push(conn);
         }
@@ -586,6 +719,17 @@ impl<O: Opener> Manager<O> {
                 let Some(job) = self.jobs.get_mut(&id) else {
                     return;
                 };
+                // A full disk fails every item the same way: pause instead,
+                // and keep the item first in line (audit REL-06).
+                if let Some(problem) = space_problem(&job.dest, &self.staging_dir, &job.asset) {
+                    self.set_state(id, JobState::Queued);
+                    self.pending.push_front(id);
+                    self.space_paused = Some(problem);
+                    self.emit(QueueEvent::Paused {
+                        reason: self.pause_reason(),
+                    });
+                    return;
+                }
                 job.attempts += 1;
                 if job.attempts <= AUTO_RETRIES {
                     self.set_state(id, JobState::Queued);
@@ -646,4 +790,32 @@ impl<O: Opener> Manager<O> {
             others,
         });
     }
+}
+
+/// Space kept free on any disk Rollcopy writes to.
+const SPACE_MARGIN: u64 = 64 * 1024 * 1024;
+
+/// Why `asset` can't be written now for lack of space, if so. The
+/// destination needs room for the output plus its temporary file; staging
+/// needs room for the original when converting.
+fn space_problem(dest: &Path, staging: &Path, asset: &Asset) -> Option<String> {
+    let size = asset.original_size.unwrap_or(0);
+    let converts = asset.save_plan().converts();
+    let dest_need = size.saturating_mul(if converts { 2 } else { 1 }) + SPACE_MARGIN;
+    let short =
+        |dir: &Path, need: u64| crate::space::available(dir).is_some_and(|free| free < need);
+    if short(dest, dest_need) {
+        return Some(format!(
+            "The destination disk is full. Free up {} or choose another folder, then Resume",
+            crate::space::human(dest_need)
+        ));
+    }
+    if converts && short(staging, size + SPACE_MARGIN) {
+        return Some(format!(
+            "Not enough space in Rollcopy's cache ({}). Free up {}, then Resume",
+            staging.display(),
+            crate::space::human(size + SPACE_MARGIN)
+        ));
+    }
+    None
 }

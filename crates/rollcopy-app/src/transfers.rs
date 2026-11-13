@@ -65,7 +65,10 @@ impl Transfers {
         let mut active = 0;
         for r in &self.rows {
             match r.state {
-                JobState::Done | JobState::Overwritten | JobState::Skipped => done += 1,
+                JobState::Done
+                | JobState::Overwritten
+                | JobState::Skipped
+                | JobState::Cancelled => done += 1,
                 JobState::Failed { .. } => failed += 1,
                 _ => active += 1,
             }
@@ -402,6 +405,19 @@ impl MainView {
                         })),
                 )
             })
+            .when(active > 0, |d| {
+                d.child(
+                    btn("cancel-all")
+                        .xsmall()
+                        .ghost()
+                        .label("Cancel all")
+                        .tooltip("Stop copying; files already copied stay")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.queue_cmd(QueueCommand::CancelAll);
+                            cx.stop_propagation();
+                        })),
+                )
+            })
             .when(done > 0, |d| {
                 d.child(
                     btn("clear")
@@ -496,6 +512,7 @@ impl MainView {
             JobState::Done => ("✔", theme.success),
             JobState::Overwritten => ("✔", theme.success),
             JobState::Skipped => ("↷", theme.muted_foreground),
+            JobState::Cancelled => ("✕", theme.muted_foreground),
             JobState::Failed { .. } => ("✖", theme.danger),
             JobState::Conflict => ("?", theme.warning),
             JobState::Queued => ("•", theme.muted_foreground),
@@ -556,6 +573,18 @@ impl MainView {
                         .label("Retry")
                         .on_click(cx.listener(move |this, _, _, _| {
                             this.queue_cmd(QueueCommand::Retry(id));
+                        })),
+                )
+            })
+            .when(!r.state.is_finished(), |d| {
+                d.child(
+                    btn(("cancel", id as usize))
+                        .xsmall()
+                        .ghost()
+                        .icon(IconName::X)
+                        .tooltip("Cancel")
+                        .on_click(cx.listener(move |this, _, _, _| {
+                            this.queue_cmd(QueueCommand::Cancel(id));
                         })),
                 )
             })
@@ -746,6 +775,7 @@ pub(crate) fn state_label(s: &JobState, progress: Option<(u64, u64)>) -> String 
         JobState::Done => "Done".into(),
         JobState::Overwritten => "Overwritten".into(),
         JobState::Skipped => "Skipped (already there)".into(),
+        JobState::Cancelled => "Cancelled".into(),
         JobState::Failed { stage, error } => format!("Failed ({}): {error}", stage.as_str()),
         JobState::Conflict => "Already exists, waiting for your answer".into(),
     }
