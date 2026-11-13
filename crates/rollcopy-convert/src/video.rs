@@ -7,8 +7,9 @@
 //! plain HLG HEVC, which more players handle.
 
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use crate::ConvertError;
@@ -187,34 +188,154 @@ fn parse_probe(out: &str) -> Result<VideoInfo, ConvertError> {
 /// (overwritten). Keeps the creation date and other container metadata.
 pub fn to_mp4(src: &Path, dst: &Path, mode: VideoMode) -> Result<(), ConvertError> {
     let info = probe(src)?;
-    let mut cmd = Command::new("ffmpeg");
-    cmd.args(["-nostdin", "-v", "error", "-y", "-i"])
-        .arg(src)
-        .args(["-map", "0:v:0", "-map", "0:a?", "-map_metadata", "0"]);
-    match mode {
-        VideoMode::Remux => {
-            cmd.args(["-c", "copy"]);
-            // Apple players need `hvc1`, not `hev1`, for HEVC in MP4.
-            match info.codec.as_str() {
-                "hevc" => cmd.args(["-tag:v", "hvc1"]),
-                "h264" => cmd.args(["-tag:v", "avc1"]),
-                _ => &mut cmd,
-            };
-        }
-        VideoMode::H264 => {
-            if info.hdr {
-                cmd.args(["-vf", TONEMAP]);
-            } else {
-                cmd.args(["-pix_fmt", "yuv420p"]);
-            }
-            cmd.args(["-c:v", "libx264", "-preset", "medium", "-crf", "18"])
-                .args(["-c:a", "aac", "-b:a", "192k"]);
+    if mode == VideoMode::H264
+        && let Some(device) = gpu_device()
+    {
+        // A clip the GPU path can't take is done in software below.
+        if run_h264(src, dst, &info, Encoder::Gpu(device)).is_ok() {
+            return Ok(());
         }
     }
+    match mode {
+        VideoMode::Remux => run_remux(src, dst, &info),
+        VideoMode::H264 => run_h264(src, dst, &info, Encoder::Cpu),
+    }
+}
+
+/// ffmpeg, quiet unless something fails, never reading stdin.
+fn ffmpeg() -> Command {
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(["-nostdin", "-v", "error", "-y"]);
+    cmd
+}
+
+fn finish(cmd: &mut Command, dst: &Path) {
     cmd.args(["-movflags", "+faststart+use_metadata_tags", "-f", "mp4"])
         .arg(dst);
-    run(&mut cmd, "ffmpeg", convert_limit(mode, info.duration_secs))?;
+}
+
+fn run_remux(src: &Path, dst: &Path, info: &VideoInfo) -> Result<(), ConvertError> {
+    let mut cmd = ffmpeg();
+    cmd.arg("-i")
+        .arg(src)
+        .args(["-map", "0:v:0", "-map", "0:a?", "-map_metadata", "0"])
+        .args(["-c", "copy"]);
+    // Apple players need `hvc1`, not `hev1`, for HEVC in MP4.
+    match info.codec.as_str() {
+        "hevc" => cmd.args(["-tag:v", "hvc1"]),
+        "h264" => cmd.args(["-tag:v", "avc1"]),
+        _ => &mut cmd,
+    };
+    finish(&mut cmd, dst);
+    run(
+        &mut cmd,
+        "ffmpeg",
+        convert_limit(VideoMode::Remux, info.duration_secs),
+    )?;
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Encoder {
+    /// libx264, tone-mapping with zscale (slow: float maths on the CPU).
+    Cpu,
+    /// Tone-mapping on the GPU with libplacebo (Vulkan) and encoding with
+    /// VA-API on this render node. About 40% faster with a tenth of the CPU
+    /// on a 1080p HLG iPhone clip (Intel, 2026-11-13); same Hable curve, so
+    /// it looks like the software result.
+    Gpu(PathBuf),
+}
+
+fn run_h264(src: &Path, dst: &Path, info: &VideoInfo, enc: Encoder) -> Result<(), ConvertError> {
+    let mut cmd = ffmpeg();
+    if let Encoder::Gpu(device) = &enc {
+        cmd.args(["-init_hw_device", "vulkan=vk", "-init_hw_device"])
+            .arg(format!("vaapi=va:{}", device.display()))
+            .args(["-filter_hw_device", "va"]);
+    }
+    cmd.arg("-i")
+        .arg(src)
+        .args(["-map", "0:v:0", "-map", "0:a?", "-map_metadata", "0"]);
+    match (&enc, info.hdr) {
+        (Encoder::Cpu, true) => {
+            cmd.args(["-vf", TONEMAP]);
+        }
+        (Encoder::Cpu, false) => {
+            cmd.args(["-pix_fmt", "yuv420p"]);
+        }
+        (Encoder::Gpu(_), true) => {
+            cmd.args(["-vf", GPU_TONEMAP]);
+        }
+        (Encoder::Gpu(_), false) => {
+            cmd.args(["-vf", "format=nv12,hwupload"]);
+        }
+    }
+    match enc {
+        Encoder::Cpu => cmd.args(["-c:v", "libx264", "-preset", "medium", "-crf", "18"]),
+        // QP 24 came out smaller than libx264 CRF 18 at the same SSIM.
+        Encoder::Gpu(_) => cmd.args(["-c:v", "h264_vaapi", "-rc_mode", "CQP", "-qp", "24"]),
+    };
+    cmd.args(["-c:a", "aac", "-b:a", "192k"]);
+    finish(&mut cmd, dst);
+    run(
+        &mut cmd,
+        "ffmpeg",
+        convert_limit(VideoMode::H264, info.duration_secs),
+    )?;
+    Ok(())
+}
+
+/// HLG/PQ → SDR on the GPU, then onto a VA-API surface for the encoder.
+/// (`tonemap_vaapi` only handles HDR10 with mastering metadata, which
+/// iPhone HLG video doesn't have; libplacebo handles HLG.)
+const GPU_TONEMAP: &str = "libplacebo=tonemapping=hable:colorspace=bt709:\
+color_primaries=bt709:color_trc=bt709:range=tv:format=nv12,hwupload";
+
+/// The render node to use for GPU encoding, if a quick trial encode works
+/// there. Checked once per run; `ROLLCOPY_NO_GPU` turns it off.
+fn gpu_device() -> Option<PathBuf> {
+    static DEVICE: OnceLock<Option<PathBuf>> = OnceLock::new();
+    DEVICE
+        .get_or_init(|| {
+            if std::env::var_os("ROLLCOPY_NO_GPU").is_some() {
+                return None;
+            }
+            let mut nodes: Vec<PathBuf> = std::fs::read_dir("/dev/dri")
+                .ok()?
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().starts_with("renderD"))
+                })
+                .collect();
+            nodes.sort();
+            nodes.into_iter().find(|n| gpu_trial(n))
+        })
+        .clone()
+}
+
+/// Converts a few frames of generated 10-bit HLG video on `device` the way
+/// [`run_h264`] would.
+fn gpu_trial(device: &Path) -> bool {
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args([
+        "-nostdin",
+        "-v",
+        "error",
+        "-init_hw_device",
+        "vulkan=vk",
+        "-init_hw_device",
+    ])
+    .arg(format!("vaapi=va:{}", device.display()))
+    .args(["-filter_hw_device", "va", "-f", "lavfi", "-i"])
+    .arg(
+        "color=c=gray:s=256x144:d=0.2,format=yuv420p10le,\
+             setparams=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc",
+    )
+    .args(["-vf", GPU_TONEMAP])
+    .args(["-c:v", "h264_vaapi", "-f", "null", "-"]);
+    run(&mut cmd, "ffmpeg", Duration::from_secs(20)).is_ok()
 }
 
 /// Checks a converted video (PLAN §7.4): it must probe, have a video stream,
@@ -265,6 +386,70 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("bad"), "{err}");
+    }
+
+    /// 2 s of generated 10-bit HLG HEVC with sound, like an iPhone clip.
+    fn hlg_clip(dir: &Path) -> Option<PathBuf> {
+        if !ffmpeg_available() {
+            return None;
+        }
+        let src = dir.join("IMG_0001.MOV");
+        let ok = Command::new("ffmpeg")
+            .args(["-nostdin", "-v", "error", "-y"])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=duration=2:size=640x360:rate=30",
+            ])
+            .args(["-f", "lavfi", "-i", "sine=duration=2"])
+            .args([
+                "-c:v",
+                "libx265",
+                "-preset",
+                "ultrafast",
+                "-pix_fmt",
+                "yuv420p10le",
+            ])
+            .args([
+                "-x265-params",
+                "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:log-level=error",
+            ])
+            .args(["-c:a", "aac", "-shortest"])
+            .arg(&src)
+            .status()
+            .ok()?
+            .success();
+        ok.then_some(src)
+    }
+
+    fn check_h264(enc: Encoder) {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(src) = hlg_clip(dir.path()) else {
+            eprintln!("ffmpeg with libx265 not available; skipping");
+            return;
+        };
+        let info = probe(&src).unwrap();
+        assert!(info.hdr);
+        let dst = dir.path().join(".rollcopy-1-1-IMG_0001.MP4.part");
+        run_h264(&src, &dst, &info, enc.clone()).unwrap();
+        let out = verify_mp4(&dst, info.duration_secs).unwrap();
+        assert_eq!(out.codec, "h264", "{enc:?}");
+        assert!(!out.hdr, "{enc:?} left HDR in");
+        assert!(out.has_audio);
+    }
+
+    #[test]
+    fn h264_in_software() {
+        check_h264(Encoder::Cpu);
+    }
+
+    #[test]
+    fn h264_on_the_gpu_when_there_is_one() {
+        match gpu_device() {
+            Some(device) => check_h264(Encoder::Gpu(device)),
+            None => eprintln!("no usable GPU; skipping"),
+        }
     }
 
     #[test]

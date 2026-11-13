@@ -29,7 +29,8 @@ on the way.
   (Camera, WhatsApp, Snapchat, …), place name, location, albums.
 - **Android/PC-friendly copies**:
   - HEIC → JPG (keeps colour profile and EXIF, applies rotation)
-  - MOV → MP4 (lossless by default; optional H.264 re-encode for old devices)
+  - MOV → MP4 (lossless by default; optional H.264 re-encode for old devices, using the GPU through
+    VA-API and Vulkan when available)
   - Edited photos and videos are copied as edited; Live Photos as the still.
 - **Safe copying**: files are written to a temporary file, checked, then renamed, so a failed copy
   never damages an existing file. Already-copied items are recognised in the folder by name and
