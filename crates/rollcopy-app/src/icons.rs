@@ -1,12 +1,17 @@
-//! App icon rasterised for the tray (PLAN §9): the packaging SVG with an
-//! optional status dot in the bottom-right corner.
+//! Tray icon (PLAN §9): a flat, one-colour outline of the app icon's film
+//! roll (`packaging/icons/tray.svg`), with a status dot in the empty
+//! bottom-right corner. The full-colour app icon was mush at 16–22 px and
+//! the dot was hard to see on its purple background.
 
 use resvg::tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Transform};
 use resvg::usvg;
 
-/// Coloured app icon, also installed for the `.desktop` file.
-pub const APP_ICON_SVG: &str =
-    include_str!("../../../packaging/icons/io.github.ankurk91.Rollcopy.svg");
+/// Flat tray glyph; its `#ffffff` is replaced with the panel colour.
+const TRAY_SVG: &str = include_str!("../../../packaging/icons/tray.svg");
+
+/// Glyph colour for a dark panel (most desktops) and for a light one.
+pub const ON_DARK: [u8; 3] = [236, 236, 238];
+pub const ON_LIGHT: [u8; 3] = [40, 40, 46];
 
 /// Sizes offered to the tray host; it picks the closest.
 const TRAY_SIZES: [u32; 3] = [22, 32, 48];
@@ -19,9 +24,12 @@ pub struct Argb {
     pub data: Vec<u8>,
 }
 
-/// Renders the app icon at tray sizes, with a status dot of `dot` (RGB).
-pub fn tray_icons(dot: Option<[u8; 3]>) -> Vec<Argb> {
-    let Ok(tree) = usvg::Tree::from_str(APP_ICON_SVG, &usvg::Options::default()) else {
+/// Renders the tray glyph in `fg` at tray sizes, with a status dot of
+/// `dot` (RGB).
+pub fn tray_icons(fg: [u8; 3], dot: Option<[u8; 3]>) -> Vec<Argb> {
+    let colour = format!("#{:02x}{:02x}{:02x}", fg[0], fg[1], fg[2]);
+    let svg = TRAY_SVG.replace("#ffffff", &colour);
+    let Ok(tree) = usvg::Tree::from_str(&svg, &usvg::Options::default()) else {
         return Vec::new();
     };
     TRAY_SIZES
@@ -37,10 +45,9 @@ fn render(tree: &usvg::Tree, size: u32, dot: Option<[u8; 3]>) -> Option<Argb> {
 
     if let Some([r, g, b]) = dot {
         let s = size as f32;
-        let radius = s * 0.2;
-        let (cx, cy) = (s - radius - 0.5, s - radius - 0.5);
-        // Dark ring first so the dot reads on the blue icon and any panel.
-        circle(&mut pm, cx, cy, radius + s * 0.06, [24, 26, 30]);
+        // Large enough to read at 16 px; the corner it sits in is empty.
+        let radius = s * 0.24;
+        let (cx, cy) = (s - radius - 0.3, s - radius - 0.3);
         circle(&mut pm, cx, cy, radius, [r, g, b]);
     }
 
@@ -90,23 +97,34 @@ mod tests {
 
     #[test]
     fn renders_all_sizes() {
-        let icons = tray_icons(None);
+        let icons = tray_icons(ON_DARK, None);
         assert_eq!(icons.len(), 3);
         for i in &icons {
             assert_eq!(i.data.len(), (i.width * i.height * 4) as usize);
         }
-        // The middle of the icon is the opaque blue square.
-        let mid = pixel(&icons[2], 6, 24);
-        assert_eq!(mid[0], 255, "opaque");
-        assert!(mid[3] > mid[1], "blue: {mid:?}");
+        // A line of the roll is drawn in the glyph colour; the background
+        // is transparent.
+        let icon = &icons[2];
+        let drawn = (0..icon.width)
+            .flat_map(|x| (0..icon.height).map(move |y| (x, y)))
+            .map(|(x, y)| pixel(icon, x, y))
+            .filter(|p| p[0] == 255)
+            .count();
+        assert!(drawn > 50, "{drawn}");
+        assert_eq!(pixel(icon, 0, icon.height - 1)[0], 0, "corner transparent");
+        let any = (0..icon.width * icon.height)
+            .map(|i| pixel(icon, i % icon.width, i / icon.width))
+            .find(|p| p[0] == 255)
+            .unwrap();
+        assert_eq!(&any[1..], &ON_DARK, "glyph colour");
     }
 
     #[test]
     fn dot_is_drawn_bottom_right() {
-        let icon = &tray_icons(Some([239, 68, 68]))[2];
+        let icon = &tray_icons(ON_LIGHT, Some([239, 68, 68]))[2];
         let s = icon.width;
-        let r = s as f32 * 0.2;
-        let c = (s as f32 - r - 0.5) as u32;
+        let r = s as f32 * 0.24;
+        let c = (s as f32 - r - 0.3) as u32;
         let [a, red, green, blue] = pixel(icon, c, c);
         assert_eq!(a, 255);
         assert!(

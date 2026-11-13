@@ -226,7 +226,7 @@ impl MainView {
                     for ev in batch {
                         view.on_event(ev, window, cx);
                     }
-                    view.after_event(window);
+                    view.after_event(window, cx);
                     cx.notify();
                 });
                 if alive.is_err() {
@@ -236,12 +236,14 @@ impl MainView {
         });
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             theme::apply(this.config.app.theme.into(), window, cx);
+            this.sync_tray(cx);
         });
         // Preferences changed (here or in the Preferences window): apply them.
         let prefs = cx.observe_global_in::<Prefs>(window, |this, window, cx| {
             let new = Prefs::get(cx).config.clone();
             if new.app.theme != this.config.app.theme {
                 theme::apply(new.app.theme.into(), window, cx);
+                this.sync_tray(cx);
             }
             if !new.library.show_recently_deleted && this.selection == Selection::RecentlyDeleted {
                 this.selection = Selection::All;

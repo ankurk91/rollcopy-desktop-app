@@ -248,8 +248,8 @@ impl MainView {
     }
 
     /// Runs after every worker event: tray state, finished-batch handling.
-    pub(crate) fn after_event(&mut self, window: &Window) {
-        self.sync_tray();
+    pub(crate) fn after_event(&mut self, window: &Window, cx: &App) {
+        self.sync_tray(cx);
         // Pause/resume (from the tray, the window, or a disconnect) notifies
         // when Rollcopy isn't in front.
         if self.transfers.paused != self.notified_pause {
@@ -320,7 +320,7 @@ impl MainView {
     }
 
     /// Sends the tray what it should show, if that changed.
-    pub(crate) fn sync_tray(&mut self) {
+    pub(crate) fn sync_tray(&mut self, cx: &App) {
         use crate::tray::{TrayState, TrayStatus};
         use rollcopy_queue::JobState;
         let rows = &self.transfers.rows;
@@ -366,6 +366,7 @@ impl MainView {
             device,
             active: unfinished > 0,
             paused: self.transfers.paused.is_some(),
+            light_panel: !gpui_kit::component::ActiveTheme::theme(cx).is_dark(),
         };
         if self.last_tray.as_ref() != Some(&state) {
             let _ = self.tray_tx.try_send(state.clone());

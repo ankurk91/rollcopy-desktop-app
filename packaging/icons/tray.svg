@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Rollcopy tray icon: the app icon's film roll and strip as a flat
+       outline, with a down-arrow. The bottom-right corner is left empty
+       for the status dot. One colour (#ffffff) is swapped at runtime. -->
+  <ellipse cx="7" cy="4.5" rx="4" ry="2"/>
+  <path d="M3 4.5v7c0 1.1 1.8 2 4 2s4-.9 4-2v-7"/>
+  <path d="M11 5.5h10v7h-10"/>
+  <path d="M14.5 5.5v7M18 5.5v7"/>
+  <path d="M7 15.5v6.5m-3-3 3 3 3-3"/>
+</svg>

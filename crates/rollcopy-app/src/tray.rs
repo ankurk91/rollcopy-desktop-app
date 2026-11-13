@@ -37,6 +37,10 @@ pub struct TrayState {
     /// Copies are queued or running (Pause/Resume makes sense).
     pub active: bool,
     pub paused: bool,
+    /// Draw the glyph dark (for a light panel). Panels are dark by default
+    /// on Mint, Ubuntu, GNOME and KDE; the app's light theme is the best
+    /// hint there is that the panel may be light.
+    pub light_panel: bool,
 }
 
 /// Menu and click actions, sent to the UI.
@@ -49,7 +53,9 @@ pub enum TrayAction {
 
 struct RollcopyTray {
     state: TrayState,
-    icons: [Vec<Icon>; 4],
+    /// Per status (idle, connected, copying, error): for a dark panel, then
+    /// for a light one.
+    icons: [[Vec<Icon>; 4]; 2],
     actions: async_channel::Sender<TrayAction>,
 }
 
@@ -77,6 +83,10 @@ impl RollcopyTray {
             TrayStatus::Error => 3,
         }
     }
+
+    fn icon_set(&self) -> &[Vec<Icon>; 4] {
+        &self.icons[usize::from(self.state.light_panel)]
+    }
 }
 
 impl ksni::Tray for RollcopyTray {
@@ -93,7 +103,7 @@ impl ksni::Tray for RollcopyTray {
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
-        self.icons[self.icon_index()].clone()
+        self.icon_set()[self.icon_index()].clone()
     }
 
     fn tool_tip(&self) -> ToolTip {
@@ -159,12 +169,16 @@ pub async fn run(
     updates: async_channel::Receiver<TrayState>,
     actions: async_channel::Sender<TrayAction>,
 ) -> bool {
-    let icons = [
-        to_ksni(icons::tray_icons(TrayStatus::Idle.dot())),
-        to_ksni(icons::tray_icons(TrayStatus::Connected.dot())),
-        to_ksni(icons::tray_icons(TrayStatus::Copying.dot())),
-        to_ksni(icons::tray_icons(TrayStatus::Error.dot())),
-    ];
+    let set = |fg| {
+        [
+            TrayStatus::Idle,
+            TrayStatus::Connected,
+            TrayStatus::Copying,
+            TrayStatus::Error,
+        ]
+        .map(|s| to_ksni(icons::tray_icons(fg, s.dot())))
+    };
+    let icons = [set(icons::ON_DARK), set(icons::ON_LIGHT)];
     let tray = RollcopyTray {
         state: TrayState::default(),
         icons,
