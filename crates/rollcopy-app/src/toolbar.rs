@@ -5,7 +5,6 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::h_flex;
 use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _, TitleBar};
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rollcopy_device::Phase;
 
@@ -47,14 +46,12 @@ impl MainView {
             _ => "Connecting…".into(),
         };
         let ready = matches!(self.library, LibState::Loaded { .. });
-        h_flex()
+        // Buttons never shrink; when the window is narrow the Save-to path
+        // and then the phone's name are cut short instead.
+        let buttons = h_flex()
+            .flex_shrink_0()
             .gap_2()
             .items_center()
-            .child(Icon::new(IconName::Smartphone).small())
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("Rollcopy"))
-            .child(div().w(px(24.)))
-            .children(save_to)
-            .child(div().flex_1())
             .child(self.render_app_menu())
             .child(
                 btn("prefs")
@@ -91,26 +88,45 @@ impl MainView {
                     .icon(IconName::Github)
                     .tooltip("Rollcopy on GitHub")
                     .on_click(|_, _, cx| cx.open_url(crate::update::REPO_URL)),
-            )
+            );
+        let reload = ready.then(|| {
+            btn("reload")
+                .xsmall()
+                .ghost()
+                .icon(IconName::RefreshCw)
+                .tooltip("Reload from iPhone (F5)")
+                .disabled(self.reloading)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.reload_library();
+                    cx.notify();
+                }))
+        });
+        h_flex()
+            .gap_2()
+            .items_center()
+            .min_w_0()
+            .child(Icon::new(IconName::Smartphone).small().flex_shrink_0())
             .child(
                 div()
+                    .flex_shrink_0()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Rollcopy"),
+            )
+            .child(div().w(px(24.)).flex_shrink_0())
+            .children(save_to)
+            .child(div().flex_1())
+            .child(buttons)
+            .child(
+                div()
+                    .min_w_0()
+                    .max_w(px(220.))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
                     .text_sm()
                     .text_color(theme.muted_foreground)
                     .child(status),
             )
-            .when(ready, |d| {
-                d.child(
-                    btn("reload")
-                        .xsmall()
-                        .ghost()
-                        .icon(IconName::RefreshCw)
-                        .tooltip("Reload from iPhone (F5)")
-                        .disabled(self.reloading)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.reload_library();
-                            cx.notify();
-                        })),
-                )
-            })
+            .children(reload.map(|b| div().flex_shrink_0().child(b)))
     }
 }

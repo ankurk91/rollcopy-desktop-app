@@ -805,17 +805,21 @@ impl MainView {
         let theme = cx.theme().clone();
         let n = self.copyable_selected();
         Some(
+            // The path gives way first when the toolbar is short of room.
             h_flex()
+                .min_w_0()
                 .gap_2()
                 .items_center()
                 .child(
                     div()
+                        .flex_shrink_0()
                         .text_sm()
                         .text_color(theme.muted_foreground)
                         .child("Save to"),
                 )
                 .child(
                     div()
+                        .min_w_0()
                         .max_w(px(340.))
                         .overflow_hidden()
                         .whitespace_nowrap()
@@ -824,24 +828,28 @@ impl MainView {
                         .child(tilde(&dest)),
                 )
                 .child(
-                    btn("pick-dest")
-                        .xsmall()
-                        .ghost()
-                        .icon(IconName::FolderOpen)
-                        .tooltip("Choose the destination folder")
-                        .on_click(cx.listener(|this, _, _, cx| this.pick_destination(cx))),
+                    div().flex_shrink_0().child(
+                        btn("pick-dest")
+                            .xsmall()
+                            .ghost()
+                            .icon(IconName::FolderOpen)
+                            .tooltip("Choose the destination folder")
+                            .on_click(cx.listener(|this, _, _, cx| this.pick_destination(cx))),
+                    ),
                 )
                 .child(
-                    btn("copy-selected")
-                        .small()
-                        .primary()
-                        .icon(IconName::Copy)
-                        .label(format!("Copy selected ({n})"))
-                        .disabled(n == 0)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.copy_selected();
-                            cx.notify();
-                        })),
+                    div().flex_shrink_0().child(
+                        btn("copy-selected")
+                            .small()
+                            .primary()
+                            .icon(IconName::Copy)
+                            .label(format!("Copy selected ({n})"))
+                            .disabled(n == 0)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.copy_selected();
+                                cx.notify();
+                            })),
+                    ),
                 )
                 .into_any_element(),
         )

@@ -177,6 +177,9 @@ fn main() {
             ),
             app_id: Some(APP_ID.into()),
             window_decorations: widgets::requested_decorations(),
+            // Lets the shadow around a self-drawn frame (GNOME on Wayland)
+            // be see-through; the window's own content stays opaque.
+            window_background: WindowBackgroundAppearance::Transparent,
             window_min_size: Some(size(px(MIN_W), px(MIN_H))),
             titlebar: Some(TitlebarOptions {
                 title: Some(APP_NAME.into()),

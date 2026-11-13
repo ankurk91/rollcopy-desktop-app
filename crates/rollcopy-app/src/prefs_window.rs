@@ -35,6 +35,7 @@ pub fn open(cx: &mut App) {
         window_bounds: Some(WindowBounds::centered(size(px(760.), px(580.)), cx)),
         app_id: Some(APP_ID.into()),
         window_decorations: crate::widgets::requested_decorations(),
+        window_background: WindowBackgroundAppearance::Transparent,
         window_min_size: Some(size(px(560.), px(400.))),
         titlebar: Some(TitlebarOptions {
             title: Some("Rollcopy Preferences".into()),
