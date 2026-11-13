@@ -104,7 +104,7 @@ impl Asset {
         let offset = self
             .tz_offset_secs
             .and_then(FixedOffset::east_opt)
-            .unwrap_or_else(|| FixedOffset::east_opt(0).expect("zero offset"));
+            .unwrap_or(chrono::Offset::fix(&Utc));
         Some(utc.with_timezone(&offset))
     }
 

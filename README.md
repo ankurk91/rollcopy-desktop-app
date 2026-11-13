@@ -141,7 +141,7 @@ No. Rollcopy only reads from the phone; it never changes or deletes anything on 
 | Path | What |
 |---|---|
 | `~/.config/rollcopy/config.toml` | Preferences |
-| `~/.local/state/rollcopy/` | Window layout, failed-copy history |
+| `~/.local/state/rollcopy/` | Window layout, failed-copy history, `rollcopy.log` (attach it to bug reports) |
 | `~/.cache/rollcopy/` | Thumbnails (safe to delete) |
 
 The cache and state folders are readable by you only. While a phone loads, Rollcopy copies its Photos

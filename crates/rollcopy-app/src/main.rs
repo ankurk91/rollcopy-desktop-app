@@ -5,7 +5,9 @@ mod config;
 mod grid;
 mod icons;
 mod instance;
+mod log;
 mod notify;
+mod paths;
 mod prefs;
 mod prefs_window;
 mod preview;
@@ -104,32 +106,23 @@ fn restored_bounds(cx: &App) -> Option<WindowBounds> {
 }
 
 fn app_paths() -> worker::CachePaths {
-    match directories::ProjectDirs::from("io.github", "ankurk91", "rollcopy") {
-        Some(d) => worker::CachePaths {
-            root: d.cache_dir().to_path_buf(),
-            state: d
-                .state_dir()
-                .unwrap_or_else(|| d.data_local_dir())
-                .to_path_buf(),
-        },
-        None => {
-            let tmp = std::env::temp_dir().join("rollcopy");
-            worker::CachePaths {
-                root: tmp.clone(),
-                state: tmp,
-            }
-        }
+    let dirs = paths::app_dirs();
+    worker::CachePaths {
+        root: dirs.cache.clone(),
+        state: dirs.state.clone(),
     }
 }
 
 fn main() {
     let paths = app_paths();
+    log::init(&paths::app_dirs().log());
+    applog!("Rollcopy {} starting", update::current_version());
     // Held until exit; the OS releases it even after a crash.
     let _instance = match instance::lock(&paths.state) {
         instance::Lock::Held => {
             match instance::activate_running() {
-                Ok(()) => eprintln!("Rollcopy is already running; showed its window."),
-                Err(e) => eprintln!("Rollcopy is already running (couldn't show it: {e})."),
+                Ok(()) => applog!("Rollcopy is already running; showed its window."),
+                Err(e) => applog!("Rollcopy is already running (couldn't show it: {e})."),
             }
             return;
         }
@@ -172,6 +165,7 @@ fn main() {
             }),
             ..Default::default()
         };
+        #[expect(clippy::expect_used, reason = "nothing to run without a window")]
         let (main_window, _) = gpui_kit::open_window(options, cx, move |window, cx| {
             let choice = prefs::Prefs::get(cx).config.app.theme.into();
             theme::apply(choice, window, cx);

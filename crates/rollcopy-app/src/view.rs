@@ -372,7 +372,7 @@ impl MainView {
             }
             Event::Tray(action) => self.on_tray_action(action, window, cx),
             Event::Phase(p) => {
-                eprintln!("phase: {}", phase_label(&p));
+                crate::applog!("phase: {}", phase_label(&p));
                 let same_phone = p.udid().is_some() && p.udid() == self.phase.udid();
                 if !matches!(p, Phase::Ready { .. }) || !same_phone {
                     self.reloading = false;
@@ -430,6 +430,7 @@ impl MainView {
                 self.recompute_visible();
             }
             Event::Library(Err(e)) => {
+                crate::applog!("library load failed: {e}");
                 if std::mem::take(&mut self.reloading)
                     && matches!(self.library, LibState::Loaded { .. })
                 {
@@ -1445,7 +1446,11 @@ pub(crate) fn gb(bytes: u64) -> String {
 /// Development aid: `ROLLCOPY_DEV_REPEAT=N` repeats the library N times to
 /// test grid performance at PLAN §6's 5,000 items with a small phone.
 /// Repeated items share device paths, so selection treats them as one.
+/// Debug builds only (audit MNT-09).
 fn dev_repeat(library: &mut Library) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
     let Some(n) = std::env::var("ROLLCOPY_DEV_REPEAT")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
@@ -1457,7 +1462,7 @@ fn dev_repeat(library: &mut Library) {
     for _ in 1..n {
         library.assets.extend(original.iter().cloned());
     }
-    eprintln!(
+    crate::applog!(
         "dev: library repeated {n}x = {} items",
         library.assets.len()
     );

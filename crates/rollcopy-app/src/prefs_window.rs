@@ -14,7 +14,7 @@ use crate::config::{ConflictPref, LayoutPref, ThemePref, VideoPref, default_base
 use crate::prefs::Prefs;
 use crate::view::btn;
 
-const APP_ID: &str = "io.github.ankurk91.Rollcopy";
+use crate::APP_ID;
 
 /// The open Preferences window, so a second request focuses it instead.
 #[derive(Default)]

@@ -53,8 +53,14 @@ impl DebugInfo {
 
     pub fn text(&self) -> String {
         format!(
-            "Rollcopy {}\nOS: {}\nDesktop: {}\nusbmuxd: {}\nffmpeg: {}\nPhone: {}",
-            self.version, self.os, self.desktop, self.usbmuxd, self.ffmpeg, self.phone
+            "Rollcopy {}\nOS: {}\nDesktop: {}\nusbmuxd: {}\nffmpeg: {}\nPhone: {}\nLog: {}",
+            self.version,
+            self.os,
+            self.desktop,
+            self.usbmuxd,
+            self.ffmpeg,
+            self.phone,
+            crate::paths::app_dirs().log().display()
         )
     }
 

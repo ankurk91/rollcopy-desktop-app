@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 # Bundled libheif 1.23 (built with cmake against the system libde265 HEVC

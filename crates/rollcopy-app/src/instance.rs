@@ -117,7 +117,7 @@ pub async fn serve(events: async_channel::Sender<Event>) {
             std::future::pending::<()>().await;
             drop(conn);
         }
-        Err(e) => eprintln!("single-instance D-Bus name unavailable: {e}"),
+        Err(e) => crate::applog!("single-instance D-Bus name unavailable: {e}"),
     }
 }
 

@@ -81,7 +81,7 @@ impl RollcopyTray {
 
 impl ksni::Tray for RollcopyTray {
     fn id(&self) -> String {
-        "io.github.ankurk91.Rollcopy".into()
+        crate::APP_ID.into()
     }
 
     fn title(&self) -> String {
@@ -173,7 +173,7 @@ pub async fn run(
     let handle = match tray.spawn().await {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("tray unavailable: {e}");
+            crate::applog!("tray unavailable: {e}");
             return false;
         }
     };

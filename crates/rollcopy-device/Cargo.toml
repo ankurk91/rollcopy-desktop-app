@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 # Pure-Rust usbmuxd/lockdown/AFC client. `ring` instead of the default aws-lc
 # for a simpler build. Needs the system usbmuxd daemon at runtime.

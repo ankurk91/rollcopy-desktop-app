@@ -186,9 +186,14 @@ pub fn spawn(paths: CachePaths) -> Worker {
     let (ev_tx, ev_rx) = async_channel::unbounded();
     let (cmd_tx, cmd_rx) = async_channel::unbounded();
     let (tray_tx, tray_rx) = async_channel::unbounded();
+    #[expect(
+        clippy::expect_used,
+        reason = "the app can't work without its device thread"
+    )]
     std::thread::Builder::new()
         .name("rollcopy-device".into())
         .spawn(move || {
+            #[expect(clippy::expect_used, reason = "the app can't work without a runtime")]
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
                 .enable_all()
@@ -196,7 +201,7 @@ pub fn spawn(paths: CachePaths) -> Worker {
                 .expect("tokio runtime");
             rt.block_on(async move {
                 crate::notify::start();
-                if std::env::var_os("ROLLCOPY_DEBUG_NOTIFY").is_some() {
+                if cfg!(debug_assertions) && std::env::var_os("ROLLCOPY_DEBUG_NOTIFY").is_some() {
                     crate::notify::send(
                         "Rollcopy notification test",
                         "If you can read this, notifications work.",
@@ -251,7 +256,7 @@ fn start_queue(paths: &CachePaths, tx: async_channel::Sender<Event>) -> QueueHan
     let history = match History::open(&paths.history()) {
         Ok(h) => Some(h),
         Err(e) => {
-            eprintln!("history disabled: {e}");
+            crate::applog!("history disabled: {e}");
             None
         }
     };
@@ -343,17 +348,23 @@ struct Conn {
     fs: MediaFs,
 }
 
-async fn connect(conn: &mut Option<Conn>, udid: &str) -> Result<(), DeviceError> {
-    if conn.as_ref().is_some_and(|c| c.udid == udid) {
-        return Ok(());
+/// The open connection to `udid`, opening one if needed.
+async fn connect<'a>(
+    conn: &'a mut Option<Conn>,
+    udid: &str,
+) -> Result<&'a mut MediaFs, DeviceError> {
+    if !conn.as_ref().is_some_and(|c| c.udid == udid) {
+        let session = Session::open(udid).await?;
+        let fs = session.media().await?;
+        *conn = Some(Conn {
+            udid: udid.to_owned(),
+            fs,
+        });
     }
-    let session = Session::open(udid).await?;
-    let fs = session.media().await?;
-    *conn = Some(Conn {
-        udid: udid.to_owned(),
-        fs,
-    });
-    Ok(())
+    match conn {
+        Some(c) => Ok(&mut c.fs),
+        None => Err(DeviceError::NotConnected),
+    }
 }
 
 async fn serve_commands(
@@ -473,8 +484,7 @@ async fn fetch_thumb(
     if req.dest.exists() {
         return Ok(());
     }
-    connect(conn, udid).await?;
-    let fs = &mut conn.as_mut().expect("connected").fs;
+    let fs = connect(conn, udid).await?;
     if let Some(dir) = req.dest.parent() {
         tokio::fs::create_dir_all(dir).await?;
     }
@@ -558,8 +568,7 @@ async fn fetch_full(
     if let Some(dir) = dest.parent() {
         tokio::fs::create_dir_all(dir).await?;
     }
-    connect(conn, udid).await?;
-    let fs = &mut conn.as_mut().expect("connected").fs;
+    let fs = connect(conn, udid).await?;
     let part = part_path(dest);
     // Keep the source's extension: the decoder goes by it for HEIC.
     let ext = source.rsplit_once('.').map_or("", |(_, e)| e);
@@ -594,8 +603,7 @@ async fn open_file(
     let dir = paths.open_dir();
     tokio::fs::create_dir_all(&dir).await?;
     let dest = dir.join(name);
-    connect(conn, udid).await?;
-    let fs = &mut conn.as_mut().expect("connected").fs;
+    let fs = connect(conn, udid).await?;
     let size = fs.stat(device_path).await?.size;
     let have = tokio::fs::metadata(&dest).await.map(|m| m.len()).ok();
     if have != Some(size) {

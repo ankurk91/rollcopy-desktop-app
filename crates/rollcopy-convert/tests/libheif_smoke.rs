@@ -1,12 +1,17 @@
-//! M0 check: libheif-rs links against the system libheif and can decode HEIC.
+//! The bundled libheif (libheif-rs `embedded-libheif`: built from source and
+//! linked statically; it uses the system libde265) is the one in use.
+
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use libheif_rs::{HeifContext, LibHeif};
 
 #[test]
-fn system_libheif_is_usable() {
+fn embedded_libheif_is_in_use() {
     let lib = LibHeif::new();
     let v = lib.version();
-    assert!(v[0] == 1 && v[1] >= 17, "unexpected libheif version {v:?}");
+    // 1.17 (Ubuntu 24.04's system copy) failed on some iPhone HEICs; the
+    // embedded build is 1.23 or newer (PLAN §4).
+    assert!(v[0] == 1 && v[1] >= 23, "unexpected libheif version {v:?}");
 }
 
 #[test]

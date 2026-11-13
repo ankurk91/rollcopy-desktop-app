@@ -33,17 +33,17 @@ pub fn start() {
         let conn = match zbus::Connection::session().await {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("notifications unavailable: {e}");
+                crate::applog!("notifications unavailable: {e}");
                 return;
             }
         };
         while let Ok((summary, body)) = rx.recv().await {
             let hints: HashMap<&str, Value<'_>> =
-                HashMap::from([("desktop-entry", Value::from("io.github.ankurk91.Rollcopy"))]);
+                HashMap::from([("desktop-entry", Value::from(crate::APP_ID))]);
             let args = (
                 "Rollcopy",
                 0u32,
-                "io.github.ankurk91.Rollcopy",
+                crate::APP_ID,
                 summary.as_str(),
                 body.as_str(),
                 Vec::<&str>::new(),
@@ -60,7 +60,7 @@ pub fn start() {
                 )
                 .await
             {
-                eprintln!("notification failed: {e}");
+                crate::applog!("notification failed: {e}");
             }
         }
         // `conn` lives until the app exits, keeping its notifications on screen.

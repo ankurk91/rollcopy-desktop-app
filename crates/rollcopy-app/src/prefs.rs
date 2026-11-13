@@ -25,19 +25,9 @@ impl Global for Prefs {}
 impl Prefs {
     /// Loads `~/.config/rollcopy/config.toml` and `~/.local/state/rollcopy/ui.toml`.
     pub fn load() -> Self {
-        let dirs = directories::ProjectDirs::from("io.github", "ankurk91", "rollcopy");
-        let config_path = dirs
-            .as_ref()
-            .map(|d| d.config_dir().join("config.toml"))
-            .unwrap_or_else(|| PathBuf::from("rollcopy-config.toml"));
-        let ui_path = dirs
-            .as_ref()
-            .map(|d| {
-                d.state_dir()
-                    .unwrap_or_else(|| d.data_local_dir())
-                    .join("ui.toml")
-            })
-            .unwrap_or_else(|| PathBuf::from("rollcopy-ui.toml"));
+        let dirs = crate::paths::app_dirs();
+        let config_path = dirs.config_file();
+        let ui_path = dirs.ui_file();
         let (config, notice) = config::load::<Config>(&config_path);
         let (ui, _) = config::load::<UiState>(&ui_path);
         Self {
@@ -50,9 +40,9 @@ impl Prefs {
         }
     }
 
-    /// Error history database, next to `ui.toml` in the state directory.
+    /// Error history database, in the state directory.
     pub fn history_path(&self) -> PathBuf {
-        self.ui_path.with_file_name("history.sqlite")
+        crate::paths::app_dirs().history()
     }
 
     /// Resets preferences, window state, the error history and the cache
@@ -73,7 +63,7 @@ impl Prefs {
             if let Err(e) = std::fs::remove_file(&f)
                 && e.kind() != std::io::ErrorKind::NotFound
             {
-                eprintln!("reset: couldn't remove {}: {e}", f.display());
+                crate::applog!("reset: couldn't remove {}: {e}", f.display());
             }
         }
         cx.restart();
@@ -134,15 +124,12 @@ impl From<ThemeChoice> for ThemePref {
 /// Deletes `~/.cache/rollcopy` (everything in it is rebuilt on demand). Only
 /// removes a directory named `rollcopy` inside the user's cache directory.
 fn clear_cache() {
-    let Some(dirs) = directories::ProjectDirs::from("io.github", "ankurk91", "rollcopy") else {
-        return;
-    };
-    let cache = dirs.cache_dir();
+    let cache = crate::paths::app_dirs().cache.as_path();
     let base = directories::BaseDirs::new().map(|b| b.cache_dir().to_path_buf());
     let safe = cache.file_name().is_some_and(|n| n == "rollcopy")
         && base.is_some_and(|b| cache.parent() == Some(b.as_path()));
     if !safe {
-        eprintln!(
+        crate::applog!(
             "reset: not clearing unexpected cache path {}",
             cache.display()
         );
@@ -151,6 +138,6 @@ fn clear_cache() {
     if let Err(e) = std::fs::remove_dir_all(cache)
         && e.kind() != std::io::ErrorKind::NotFound
     {
-        eprintln!("reset: couldn't clear {}: {e}", cache.display());
+        crate::applog!("reset: couldn't clear {}: {e}", cache.display());
     }
 }

@@ -35,10 +35,14 @@ pub fn current_version() -> &'static str {
 }
 
 /// Checks the latest release. Blocking (up to 10 s): run off the UI thread.
-/// `ROLLCOPY_UPDATE_URL` overrides the endpoint for testing.
+/// In debug builds `ROLLCOPY_UPDATE_URL` overrides the endpoint for testing;
+/// release builds always ask GitHub (audit MNT-09).
 pub fn check() -> UpdateCheck {
-    let url = std::env::var("ROLLCOPY_UPDATE_URL").unwrap_or_else(|_| LATEST_URL.to_owned());
-    check_url(&url, current_version())
+    #[cfg(debug_assertions)]
+    if let Ok(url) = std::env::var("ROLLCOPY_UPDATE_URL") {
+        return check_url(&url, current_version());
+    }
+    check_url(LATEST_URL, current_version())
 }
 
 pub fn check_url(url: &str, current: &str) -> UpdateCheck {

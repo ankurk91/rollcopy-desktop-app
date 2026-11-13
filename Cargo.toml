@@ -36,3 +36,14 @@ debug-assertions = false
 [profile.release]
 # Smaller installed binary (debug symbols are not shipped).
 strip = true
+
+# Lint policy for every crate (audit MNT-01). unwrap/expect are allowed in
+# tests (clippy.toml); elsewhere each use states its invariant.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+dbg_macro = "deny"
+todo = "deny"

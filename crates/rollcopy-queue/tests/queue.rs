@@ -1,5 +1,7 @@
 //! Queue behaviour against a fake phone (no device needed).
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -179,9 +179,8 @@ pub async fn watch(emit: impl FnMut(Phase)) {
         }
 
         // A pair request is running: wait for its result.
-        if let Some(task) = &t.pairing {
-            if task.is_finished() {
-                let task = t.pairing.take().expect("checked above");
+        if t.pairing.is_some() {
+            if let Some(task) = t.pairing.take_if(|task| task.is_finished()) {
                 match task.await {
                     Ok(Ok(())) => t.next_try = Instant::now(),
                     Ok(Err(DeviceError::PairingDenied)) => {
