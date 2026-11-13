@@ -149,6 +149,14 @@ impl MainView {
             Selection::Undated => "Undated".to_owned(),
             Selection::Hidden => "Hidden".to_owned(),
             Selection::RecentlyDeleted => "Recently Deleted".to_owned(),
+            Selection::Album(i) => match &self.library {
+                LibState::Loaded { tree, .. } => tree
+                    .albums
+                    .get(i)
+                    .map(|(name, _)| name.clone())
+                    .unwrap_or_default(),
+                _ => String::new(),
+            },
         };
         let mut summary = format!("{} items", self.visible.len());
         if !self.selected.is_empty() {

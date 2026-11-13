@@ -17,7 +17,7 @@ on the way.
 
 ## Features
 
-- **Browse the Photos library**: thumbnails by year and month, filters (photos, videos, edited,
+- **Browse the Photos library**: thumbnails by year and month or by album, filters (photos, videos, edited,
   copied / not copied), sort by date taken, keyboard navigation, and a full-window viewer
   (Space). A **list view** shows names, dates and sizes without any thumbnails: quicker, and
   nothing on screen for people looking over your shoulder. New photos taken while the phone is plugged in appear with **Reload** (F5).

@@ -179,6 +179,8 @@ pub struct MainView {
     pub(crate) revealed: HashSet<String>,
     /// List view (no thumbnails) instead of the grid.
     pub(crate) list_view: bool,
+    /// The Albums section of the tree is open.
+    pub(crate) albums_open: bool,
     /// List column widths (see `columns::LIBRARY`).
     pub(crate) list_widths: Vec<f32>,
     /// Width of a list row this frame, for fitting the columns.
@@ -325,6 +327,7 @@ impl MainView {
             full: HashMap::new(),
             revealed: HashSet::new(),
             list_view: saved_ui.list_view,
+            albums_open: false,
             list_widths: crate::columns::LIBRARY.widths_from(&saved_ui.list_columns),
             list_row_w: 800.,
             copied_for: None,
@@ -416,6 +419,7 @@ impl MainView {
             Event::Library(Ok(mut library)) => {
                 dev_repeat(&mut library);
                 let tree = LibraryTree::build(&library.assets, self.config.library.show_hidden);
+                self.keep_album_selection(&tree);
                 let reloaded = std::mem::take(&mut self.reloading);
                 // After a reload, keep the place: indices change, device
                 // paths don't.
@@ -483,11 +487,31 @@ impl MainView {
         let _ = self.commands.try_send(Command::Reload { udid });
     }
 
+    /// Album indices change when the tree is rebuilt: keep the selected album
+    /// by name, or fall back to All media if it's gone.
+    fn keep_album_selection(&mut self, new: &LibraryTree) {
+        let Selection::Album(i) = self.selection else {
+            return;
+        };
+        let name = match &self.library {
+            LibState::Loaded { tree, .. } => tree.albums.get(i).map(|(n, _)| n.clone()),
+            _ => None,
+        };
+        self.selection = name
+            .and_then(|n| new.album_index(&n))
+            .map_or(Selection::All, Selection::Album);
+    }
+
     /// Rebuilds the tree after the Hidden-album preference changed.
     fn rebuild_tree(&mut self, cx: &mut Context<Self>) {
         let show_hidden = self.config.library.show_hidden;
-        if let LibState::Loaded { library, tree } = &mut self.library {
-            *tree = LibraryTree::build(&library.assets, show_hidden);
+        let new = match &self.library {
+            LibState::Loaded { library, .. } => LibraryTree::build(&library.assets, show_hidden),
+            _ => return,
+        };
+        self.keep_album_selection(&new);
+        if let LibState::Loaded { tree, .. } = &mut self.library {
+            *tree = new;
         }
         self.forget_hidden_thumbs(cx);
         self.counts_dirty = true;
@@ -550,7 +574,7 @@ impl MainView {
     pub(crate) fn recount(&mut self) {
         let (sel, filter) = (self.selection, self.filter);
         let show_hidden = self.config.library.show_hidden;
-        let LibState::Loaded { library, .. } = &self.library else {
+        let LibState::Loaded { library, tree } = &self.library else {
             self.filter_counts = [0; 4];
             self.sync_counts = [0; 3];
             return;
@@ -560,7 +584,7 @@ impl MainView {
         for a in library
             .assets
             .iter()
-            .filter(|a| LibraryTree::contains(sel, a, show_hidden))
+            .filter(|a| tree.contains(sel, a, show_hidden))
         {
             for (n, f) in counts.iter_mut().zip(Filter::ALL) {
                 if f.matches(a) {
@@ -659,12 +683,16 @@ impl MainView {
         self.recount();
         let (sel, filter, sync) = (self.selection, self.filter, self.sync_filter);
         let show_hidden = self.config.library.show_hidden;
-        let mut visible: Vec<usize> = self
-            .assets()
+        let LibState::Loaded { library, tree } = &self.library else {
+            self.visible.clear();
+            return;
+        };
+        let mut visible: Vec<usize> = library
+            .assets
             .iter()
             .enumerate()
             .filter(|(_, a)| {
-                LibraryTree::contains(sel, a, show_hidden)
+                tree.contains(sel, a, show_hidden)
                     && filter.matches(a)
                     && sync.matches(self.is_copied(&a.device_path()))
             })
@@ -1024,6 +1052,23 @@ impl MainView {
                 }
             }
         }
+        if !tree.albums.is_empty() {
+            let open = self.albums_open;
+            list = list.child(self.albums_header(tree.albums.len(), open, cx));
+            if open {
+                for (i, (name, n)) in tree.albums.iter().enumerate() {
+                    list = list.child(div().pl_5().child(self.tree_row(
+                        format!("album{i}").into(),
+                        None,
+                        name.clone().into(),
+                        *n,
+                        Selection::Album(i),
+                        false,
+                        cx,
+                    )));
+                }
+            }
+        }
         if tree.undated > 0 {
             list = list.child(self.tree_row(
                 "undated".into(),
@@ -1059,6 +1104,42 @@ impl MainView {
             ));
         }
         list
+    }
+
+    /// "Albums": opens and closes the list of albums (not a selection).
+    fn albums_header(&self, count: usize, open: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        h_flex()
+            .id("albums")
+            .w_full()
+            .px_2()
+            .py_1()
+            .gap_1()
+            .rounded_md()
+            .text_sm()
+            .cursor_pointer()
+            .hover(|s| s.bg(theme.muted))
+            .child(
+                div().w(px(16.)).child(
+                    Icon::new(if open {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronRight
+                    })
+                    .xsmall(),
+                ),
+            )
+            .child(div().flex_1().child("Albums"))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(count.to_string()),
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.albums_open = !this.albums_open;
+                cx.notify();
+            }))
     }
 
     #[allow(clippy::too_many_arguments)]

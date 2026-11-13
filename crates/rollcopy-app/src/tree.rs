@@ -18,6 +18,8 @@ pub enum Selection {
     Year(i32),
     Month(i32, u32),
     Undated,
+    /// An album, by index into [`LibraryTree::albums`].
+    Album(usize),
     Hidden,
     RecentlyDeleted,
 }
@@ -38,12 +40,16 @@ pub struct LibraryTree {
     pub undated: usize,
     /// Hidden-album items; 0 unless they are shown.
     pub hidden: usize,
+    /// User albums from the Photos database (name, items), sorted by name.
+    /// Hidden and Recently Deleted items aren't counted or listed in them.
+    pub albums: Vec<(String, usize)>,
     pub recently_deleted: usize,
 }
 
 impl LibraryTree {
     pub fn build(assets: &[Asset], show_hidden: bool) -> Self {
         let mut by_year: BTreeMap<i32, BTreeMap<u32, usize>> = BTreeMap::new();
+        let mut albums: BTreeMap<(String, String), usize> = BTreeMap::new();
         let mut t = LibraryTree::default();
         for a in assets {
             if a.hidden && !show_hidden {
@@ -58,6 +64,11 @@ impl LibraryTree {
                 continue;
             }
             t.all += 1;
+            for name in &a.albums {
+                *albums
+                    .entry((name.to_lowercase(), name.clone()))
+                    .or_default() += 1;
+            }
             match a.year_month() {
                 Some((y, m)) => *by_year.entry(y).or_default().entry(m).or_default() += 1,
                 None => t.undated += 1,
@@ -72,11 +83,17 @@ impl LibraryTree {
                 months: months.into_iter().rev().collect(),
             })
             .collect();
+        t.albums = albums.into_iter().map(|((_, name), n)| (name, n)).collect();
         t
     }
 
+    /// The album an `Album` selection points at, by name.
+    pub fn album_index(&self, name: &str) -> Option<usize> {
+        self.albums.iter().position(|(n, _)| n == name)
+    }
+
     /// Whether an asset belongs to a selection.
-    pub fn contains(sel: Selection, a: &Asset, show_hidden: bool) -> bool {
+    pub fn contains(&self, sel: Selection, a: &Asset, show_hidden: bool) -> bool {
         if a.hidden && !show_hidden {
             return false;
         }
@@ -89,6 +106,10 @@ impl LibraryTree {
             Selection::Year(y) => a.year_month().is_some_and(|(ay, _)| ay == y),
             Selection::Month(y, m) => a.year_month() == Some((y, m)),
             Selection::Undated => a.year_month().is_none(),
+            Selection::Album(i) => self
+                .albums
+                .get(i)
+                .is_some_and(|(name, _)| a.albums.iter().any(|n| n == name)),
         }
     }
 }
@@ -148,18 +169,10 @@ mod tests {
         assert_eq!(t.years[0].months, vec![(11, 2), (10, 1)]);
         assert_eq!(t.years[1].months, vec![(9, 1)]);
 
-        assert!(LibraryTree::contains(
-            Selection::Month(2026, 11),
-            &assets[2],
-            false
-        ));
-        assert!(!LibraryTree::contains(Selection::All, &assets[4], false));
-        assert!(LibraryTree::contains(
-            Selection::RecentlyDeleted,
-            &assets[4],
-            false
-        ));
-        assert!(LibraryTree::contains(Selection::Undated, &undated, false));
+        assert!(t.contains(Selection::Month(2026, 11), &assets[2], false));
+        assert!(!t.contains(Selection::All, &assets[4], false));
+        assert!(t.contains(Selection::RecentlyDeleted, &assets[4], false));
+        assert!(t.contains(Selection::Undated, &undated, false));
     }
 
     #[test]
@@ -184,34 +197,44 @@ mod tests {
             Selection::Hidden,
             Selection::RecentlyDeleted,
         ] {
-            assert!(!LibraryTree::contains(sel, &hidden, false), "{sel:?}");
-            assert!(
-                !LibraryTree::contains(sel, &hidden_trashed, false),
-                "{sel:?}"
-            );
+            assert!(!t.contains(sel, &hidden, false), "{sel:?}");
+            assert!(!t.contains(sel, &hidden_trashed, false), "{sel:?}");
         }
 
         // Shown: only under Hidden (and Recently Deleted once trashed),
         // never in All media, so "Copy all" never picks them up.
         let t = LibraryTree::build(&assets, true);
         assert_eq!((t.all, t.hidden, t.recently_deleted), (1, 1, 1));
-        assert!(LibraryTree::contains(Selection::Hidden, &hidden, true));
-        assert!(!LibraryTree::contains(Selection::All, &hidden, true));
-        assert!(!LibraryTree::contains(
-            Selection::Month(2026, 11),
-            &hidden,
-            true
-        ));
-        assert!(LibraryTree::contains(
-            Selection::RecentlyDeleted,
-            &hidden_trashed,
-            true
-        ));
-        assert!(!LibraryTree::contains(
-            Selection::Hidden,
-            &hidden_trashed,
-            true
-        ));
+        assert!(t.contains(Selection::Hidden, &hidden, true));
+        assert!(!t.contains(Selection::All, &hidden, true));
+        assert!(!t.contains(Selection::Month(2026, 11), &hidden, true));
+        assert!(t.contains(Selection::RecentlyDeleted, &hidden_trashed, true));
+        assert!(!t.contains(Selection::Hidden, &hidden_trashed, true));
+    }
+
+    #[test]
+    fn albums_list_their_items_but_not_hidden_or_deleted_ones() {
+        let mut beach = asset(2026, 11, false);
+        beach.albums = vec!["Beach".into(), "favourites".into()];
+        let mut trip = asset(2026, 10, false);
+        trip.albums = vec!["Beach".into()];
+        let mut secret = asset(2026, 10, false);
+        secret.hidden = true;
+        secret.albums = vec!["Beach".into()];
+        let mut gone = asset(2026, 10, true);
+        gone.albums = vec!["Beach".into()];
+        let assets = vec![beach.clone(), trip, secret.clone(), gone];
+
+        let t = LibraryTree::build(&assets, true);
+        // Sorted by name, ignoring case.
+        assert_eq!(
+            t.albums,
+            vec![("Beach".to_owned(), 2), ("favourites".to_owned(), 1)]
+        );
+        let i = t.album_index("Beach").unwrap();
+        assert!(t.contains(Selection::Album(i), &beach, true));
+        assert!(!t.contains(Selection::Album(i), &secret, true));
+        assert!(!t.contains(Selection::Album(99), &beach, true));
     }
 
     #[test]
