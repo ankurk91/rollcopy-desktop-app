@@ -5,6 +5,7 @@
 #   ~/.local/share/icons/hicolor/scalable/apps/io.github.ankurk91.Rollcopy.svg
 # Usage: packaging/install-local.sh            build (release) and install
 #        packaging/install-local.sh --uninstall remove those three files
+# The ~/.local copy takes precedence over a .deb install (PATH and menu).
 set -euo pipefail
 
 ID=io.github.ankurk91.Rollcopy
@@ -24,6 +25,14 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     refresh
     echo "Rollcopy removed (settings and cache are kept in ~/.config, ~/.local/state, ~/.cache)."
     exit 0
+fi
+
+# A user-local copy comes first on PATH and in the menu, so it hides a
+# Rollcopy installed from the .deb (which then never seems to update).
+if dpkg-query -W -f='${Status}' rollcopy 2>/dev/null | grep -q "install ok installed"; then
+    echo "Note: Rollcopy $(dpkg-query -W -f='${Version}' rollcopy) is installed from a .deb."
+    echo "      This copy in ~/.local will take its place until you run:"
+    echo "      packaging/install-local.sh --uninstall"
 fi
 
 cargo build --release -p rollcopy-app --manifest-path "$ROOT/Cargo.toml"
