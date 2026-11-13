@@ -157,9 +157,35 @@ pub(crate) fn check(name: &str) -> Check {
     Check::Fine { app }
 }
 
+/// A plain message for a failed `xdg-open` (its exit codes: 2 file not
+/// found, 3 a required tool missing, 4 the action failed, which is what
+/// "no app for this kind of file" looks like).
+pub(crate) fn xdg_open_error(name: &str, code: Option<i32>) -> String {
+    let is_video = mime_for(name).is_some_and(|m| m.starts_with("video/"));
+    let install = if is_video {
+        "Install a video player, for example VLC: sudo apt install vlc"
+    } else {
+        "Install an image viewer that opens this kind of file"
+    };
+    match code {
+        Some(3) => "xdg-open is missing a tool it needs (is xdg-utils installed?)".to_owned(),
+        Some(4) => format!("no app could open {name}. {install}"),
+        Some(c) => format!("the system couldn't open {name} (xdg-open exit code {c}). {install}"),
+        None => format!("the system couldn't open {name}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xdg_open_failures_read_plainly() {
+        let msg = xdg_open_error("IMG_0001.MOV", Some(4));
+        assert!(msg.starts_with("no app could open IMG_0001.MOV"), "{msg}");
+        assert!(msg.contains("sudo apt install vlc"));
+        assert!(xdg_open_error("IMG_0001.HEIC", Some(4)).contains("image viewer"));
+    }
 
     #[test]
     fn mime_types() {

@@ -649,7 +649,10 @@ async fn open_file(
         .status()
         .await?;
     if !status.success() {
-        return Err(DeviceError::Other(format!("xdg-open exited with {status}")));
+        return Err(DeviceError::Other(crate::players::xdg_open_error(
+            name,
+            status.code(),
+        )));
     }
     Ok((app, hint))
 }
