@@ -89,19 +89,14 @@ impl Default for Conversion {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LibraryPrefs {
-    /// List Recently Deleted in the tree (greyed, never copied).
+    /// List Recently Deleted in the tree (greyed, never copied). Off by
+    /// default: iOS locks that album too (PLAN §3).
     pub show_recently_deleted: bool,
-}
-
-impl Default for LibraryPrefs {
-    fn default() -> Self {
-        Self {
-            show_recently_deleted: true,
-        }
-    }
+    /// List the phone's Hidden album, under its own node (audit SEC-01).
+    pub show_hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

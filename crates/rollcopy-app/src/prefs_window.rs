@@ -207,16 +207,32 @@ fn pages() -> Vec<SettingPage> {
                     ),
             ),
         SettingPage::new("Library").group(
-            SettingGroup::new().item(
-                SettingItem::new(
-                    "Show Recently Deleted",
-                    SettingField::switch(
-                        |cx| Prefs::get(cx).config.library.show_recently_deleted,
-                        |v, cx| Prefs::update_config(cx, |c| c.library.show_recently_deleted = v),
+            SettingGroup::new()
+                .item(
+                    SettingItem::new(
+                        "Show Hidden album",
+                        SettingField::switch(
+                            |cx| Prefs::get(cx).config.library.show_hidden,
+                            |v, cx| Prefs::update_config(cx, |c| c.library.show_hidden = v),
+                        ),
+                    )
+                    .description(
+                        "The iPhone locks this album with Face ID or the passcode. When on, \
+                         hidden items are listed under Hidden, never in All media.",
                     ),
                 )
-                .description("Listed greyed out in the library. Never copied."),
-            ),
+                .item(
+                    SettingItem::new(
+                        "Show Recently Deleted",
+                        SettingField::switch(
+                            |cx| Prefs::get(cx).config.library.show_recently_deleted,
+                            |v, cx| {
+                                Prefs::update_config(cx, |c| c.library.show_recently_deleted = v)
+                            },
+                        ),
+                    )
+                    .description("Listed greyed out in the library. Never copied."),
+                ),
         ),
         SettingPage::new("App").group(
             SettingGroup::new()

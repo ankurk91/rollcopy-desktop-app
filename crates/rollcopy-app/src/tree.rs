@@ -1,5 +1,11 @@
-//! Library tree model: All media → year → month, plus Recently Deleted
-//! (PLAN §6, left pane). Pure data; the view renders it.
+//! Library tree model: All media → year → month, plus Hidden and Recently
+//! Deleted (PLAN §6, left pane). Pure data; the view renders it.
+//!
+//! Items in the phone's Hidden album are never part of All media or the
+//! year/month nodes. iOS locks that album behind Face ID or the passcode, so
+//! they only appear, under their own node, when the user turns on "Show
+//! Hidden album" (audit SEC-01). With it off they aren't counted or listed
+//! anywhere, Recently Deleted included.
 
 use std::collections::BTreeMap;
 
@@ -12,6 +18,7 @@ pub enum Selection {
     Year(i32),
     Month(i32, u32),
     Undated,
+    Hidden,
     RecentlyDeleted,
 }
 
@@ -29,16 +36,25 @@ pub struct LibraryTree {
     /// Newest year first.
     pub years: Vec<YearNode>,
     pub undated: usize,
+    /// Hidden-album items; 0 unless they are shown.
+    pub hidden: usize,
     pub recently_deleted: usize,
 }
 
 impl LibraryTree {
-    pub fn build(assets: &[Asset]) -> Self {
+    pub fn build(assets: &[Asset], show_hidden: bool) -> Self {
         let mut by_year: BTreeMap<i32, BTreeMap<u32, usize>> = BTreeMap::new();
         let mut t = LibraryTree::default();
         for a in assets {
+            if a.hidden && !show_hidden {
+                continue;
+            }
             if a.trashed {
                 t.recently_deleted += 1;
+                continue;
+            }
+            if a.hidden {
+                t.hidden += 1;
                 continue;
             }
             t.all += 1;
@@ -60,10 +76,15 @@ impl LibraryTree {
     }
 
     /// Whether an asset belongs to a selection.
-    pub fn contains(sel: Selection, a: &Asset) -> bool {
+    pub fn contains(sel: Selection, a: &Asset, show_hidden: bool) -> bool {
+        if a.hidden && !show_hidden {
+            return false;
+        }
         match sel {
             Selection::RecentlyDeleted => a.trashed,
             _ if a.trashed => false,
+            Selection::Hidden => a.hidden,
+            _ if a.hidden => false,
             Selection::All => true,
             Selection::Year(y) => a.year_month().is_some_and(|(ay, _)| ay == y),
             Selection::Month(y, m) => a.year_month() == Some((y, m)),
@@ -118,7 +139,7 @@ mod tests {
             asset(2026, 11, true),
             undated.clone(),
         ];
-        let t = LibraryTree::build(&assets);
+        let t = LibraryTree::build(&assets, false);
         assert_eq!(t.all, 5);
         assert_eq!(t.recently_deleted, 1);
         assert_eq!(t.undated, 1);
@@ -129,14 +150,68 @@ mod tests {
 
         assert!(LibraryTree::contains(
             Selection::Month(2026, 11),
-            &assets[2]
+            &assets[2],
+            false
         ));
-        assert!(!LibraryTree::contains(Selection::All, &assets[4]));
+        assert!(!LibraryTree::contains(Selection::All, &assets[4], false));
         assert!(LibraryTree::contains(
             Selection::RecentlyDeleted,
-            &assets[4]
+            &assets[4],
+            false
         ));
-        assert!(LibraryTree::contains(Selection::Undated, &undated));
+        assert!(LibraryTree::contains(Selection::Undated, &undated, false));
+    }
+
+    #[test]
+    fn hidden_items_stay_out_unless_shown() {
+        let mut hidden = asset(2026, 11, false);
+        hidden.hidden = true;
+        let mut hidden_trashed = asset(2026, 11, true);
+        hidden_trashed.hidden = true;
+        let assets = vec![
+            asset(2026, 11, false),
+            hidden.clone(),
+            hidden_trashed.clone(),
+        ];
+
+        let t = LibraryTree::build(&assets, false);
+        assert_eq!((t.all, t.hidden, t.recently_deleted), (1, 0, 0));
+        assert_eq!(t.years[0].months, vec![(11, 1)]);
+        for sel in [
+            Selection::All,
+            Selection::Year(2026),
+            Selection::Month(2026, 11),
+            Selection::Hidden,
+            Selection::RecentlyDeleted,
+        ] {
+            assert!(!LibraryTree::contains(sel, &hidden, false), "{sel:?}");
+            assert!(
+                !LibraryTree::contains(sel, &hidden_trashed, false),
+                "{sel:?}"
+            );
+        }
+
+        // Shown: only under Hidden (and Recently Deleted once trashed),
+        // never in All media, so "Copy all" never picks them up.
+        let t = LibraryTree::build(&assets, true);
+        assert_eq!((t.all, t.hidden, t.recently_deleted), (1, 1, 1));
+        assert!(LibraryTree::contains(Selection::Hidden, &hidden, true));
+        assert!(!LibraryTree::contains(Selection::All, &hidden, true));
+        assert!(!LibraryTree::contains(
+            Selection::Month(2026, 11),
+            &hidden,
+            true
+        ));
+        assert!(LibraryTree::contains(
+            Selection::RecentlyDeleted,
+            &hidden_trashed,
+            true
+        ));
+        assert!(!LibraryTree::contains(
+            Selection::Hidden,
+            &hidden_trashed,
+            true
+        ));
     }
 
     #[test]

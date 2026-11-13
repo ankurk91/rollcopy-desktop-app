@@ -179,7 +179,8 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 **Left pane: devices and library**
 - Device card with name, model, iOS version, storage bar and battery. "Details" opens the serial number, UDID and iCloud Backup hint.
 - The library tree is grouped **year → month** by capture date. An "On-phone folders" view (`100APPLE`, …) is available as an advanced toggle.
-- Recently Deleted is listed with its count but greyed out, and excluded from "copy folder".
+- Recently Deleted is listed with its count but greyed out, and excluded from "copy folder". It's off by default (Preferences → Library).
+- **Hidden album** (audit SEC-01, 2026-11-13): iOS locks it behind Face ID or the passcode, so its items are left out of the tree, the grid, the counts and every copy action, and their cached thumbnails are deleted. Preferences → Library → *Show Hidden album* lists them under their own **Hidden** node, never inside All media, so "Copy all" never includes them.
 
 **Centre pane: thumbnail grid**
 - Filter chips: All / Photos / Videos / Edited, plus Copied / Not copied (click the active one again to turn it off). Copied state comes from the destination folder, as for the badges.
@@ -271,7 +272,8 @@ Opened from ☰ → Preferences… or Ctrl+,. It's a small separate window with 
 | | When a file already exists | Ask / Always skip / Always overwrite (default **Ask**) |
 | **Conversion** | JPEG quality for HEIC (dropdown of presets 80–100; the number input hit a gpui focus panic in debug builds) | 92 |
 | | Videos | Lossless MP4 (default) / Re-encode to H.264 |
-| **Library** | Show Recently Deleted (greyed, never copied) | On |
+| **Library** | Show Hidden album (own node, never in All media) | Off |
+| | Show Recently Deleted (greyed, never copied) | Off |
 | | Default view | By date / On-phone folders |
 | **App** | Theme | System / Light / Dark (a toolbar toggle cycles through them already, from M4; dark mode uses softer greys than the stock theme) |
 | | Keep running in tray while copying | On |

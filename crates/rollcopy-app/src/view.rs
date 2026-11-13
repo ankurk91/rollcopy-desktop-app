@@ -254,7 +254,14 @@ impl MainView {
             if !new.library.show_recently_deleted && this.selection == Selection::RecentlyDeleted {
                 this.selection = Selection::All;
             }
+            let hidden_changed = new.library.show_hidden != this.config.library.show_hidden;
+            if !new.library.show_hidden && this.selection == Selection::Hidden {
+                this.selection = Selection::All;
+            }
             this.config = new;
+            if hidden_changed {
+                this.rebuild_tree(cx);
+            }
             this.sync_queue_settings();
             cx.notify();
         });
@@ -356,12 +363,13 @@ impl MainView {
             Event::LibraryLoading => self.library = LibState::Loading,
             Event::Library(Ok(mut library)) => {
                 dev_repeat(&mut library);
-                let tree = LibraryTree::build(&library.assets);
+                let tree = LibraryTree::build(&library.assets, self.config.library.show_hidden);
                 self.expanded.clear();
                 if let Some(newest) = tree.years.first() {
                     self.expanded.insert(newest.year);
                 }
                 self.library = LibState::Loaded { library, tree };
+                self.forget_hidden_thumbs(cx);
                 self.recompute_visible();
             }
             Event::Library(Err(e)) => self.library = LibState::Failed(e),
@@ -376,6 +384,49 @@ impl MainView {
                 self.status = Some(format!("Couldn't open {name}: {error}"))
             }
         }
+    }
+
+    /// Rebuilds the tree after the Hidden-album preference changed.
+    fn rebuild_tree(&mut self, cx: &mut Context<Self>) {
+        let show_hidden = self.config.library.show_hidden;
+        if let LibState::Loaded { library, tree } = &mut self.library {
+            *tree = LibraryTree::build(&library.assets, show_hidden);
+        }
+        self.forget_hidden_thumbs(cx);
+        self.counts_dirty = true;
+        self.recompute_visible();
+    }
+
+    /// With the Hidden album not shown, deletes cached thumbnails of its
+    /// items (some may be cached from before, or from when it was shown).
+    fn forget_hidden_thumbs(&mut self, cx: &mut Context<Self>) {
+        if self.config.library.show_hidden {
+            return;
+        }
+        let Some(udid) = self.udid().map(str::to_owned) else {
+            return;
+        };
+        let mut files = Vec::new();
+        let mut keys = Vec::new();
+        for a in self.assets().iter().filter(|a| a.hidden) {
+            files.push(self.paths.thumb(&udid, a));
+            files.push(self.paths.view(&udid, a));
+            keys.push(a.device_path());
+        }
+        for key in keys {
+            self.thumbs.remove(&key);
+            self.full.remove(&key);
+        }
+        if files.is_empty() {
+            return;
+        }
+        cx.background_executor()
+            .spawn(async move {
+                for f in files {
+                    let _ = std::fs::remove_file(f);
+                }
+            })
+            .detach();
     }
 
     pub(crate) fn assets(&self) -> &[rollcopy_library::Asset] {
@@ -398,6 +449,7 @@ impl MainView {
     /// item in the current tree selection (one file check each, cached).
     pub(crate) fn recount(&mut self) {
         let (sel, filter) = (self.selection, self.filter);
+        let show_hidden = self.config.library.show_hidden;
         let settings = self.copy_settings();
         let LibState::Loaded { library, .. } = &self.library else {
             self.filter_counts = [0; 4];
@@ -409,7 +461,7 @@ impl MainView {
         for a in library
             .assets
             .iter()
-            .filter(|a| LibraryTree::contains(sel, a))
+            .filter(|a| LibraryTree::contains(sel, a, show_hidden))
         {
             for (n, f) in counts.iter_mut().zip(Filter::ALL) {
                 if f.matches(a) {
@@ -446,12 +498,13 @@ impl MainView {
     pub(crate) fn recompute_visible(&mut self) {
         self.recount();
         let (sel, filter, sync) = (self.selection, self.filter, self.sync_filter);
+        let show_hidden = self.config.library.show_hidden;
         let mut visible: Vec<usize> = self
             .assets()
             .iter()
             .enumerate()
             .filter(|(_, a)| {
-                LibraryTree::contains(sel, a)
+                LibraryTree::contains(sel, a, show_hidden)
                     && filter.matches(a)
                     && sync.matches(self.is_copied(&a.device_path()))
             })
@@ -785,6 +838,17 @@ impl MainView {
                 "Undated".into(),
                 tree.undated,
                 Selection::Undated,
+                false,
+                cx,
+            ));
+        }
+        if self.config.library.show_hidden && tree.hidden > 0 {
+            list = list.child(self.tree_row(
+                "hidden".into(),
+                None,
+                "Hidden".into(),
+                tree.hidden,
+                Selection::Hidden,
                 false,
                 cx,
             ));

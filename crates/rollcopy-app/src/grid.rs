@@ -104,6 +104,7 @@ impl MainView {
             Selection::Year(y) => y.to_string(),
             Selection::Month(y, m) => format!("{} {y}", month_name(m)),
             Selection::Undated => "Undated".to_owned(),
+            Selection::Hidden => "Hidden".to_owned(),
             Selection::RecentlyDeleted => "Recently Deleted".to_owned(),
         };
         let mut summary = format!("{} items", self.visible.len());
@@ -585,7 +586,11 @@ impl MainView {
     fn render_empty(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         let filtered = self.filter != Filter::All || self.sync_filter != SyncFilter::All;
-        let library_empty = !self.assets().iter().any(|a| !a.trashed);
+        let show_hidden = self.config.library.show_hidden;
+        let library_empty = !self
+            .assets()
+            .iter()
+            .any(|a| !a.trashed && (show_hidden || !a.hidden));
         let (icon, title, body): (IconName, &str, String) = if library_empty {
             (
                 IconName::Images,
