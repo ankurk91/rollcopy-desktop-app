@@ -96,6 +96,7 @@ packaging/install-local.sh --uninstall
 | Shift + arrows | Extend the selection |
 | Ctrl+A / Esc | Select all / clear the selection (Esc also closes the viewer) |
 | Space / Enter / double-click | View the photo full-window (videos open in your player) |
+| F5 / Ctrl+R | Reload the library from the iPhone (new photos) |
 | Ctrl+, | Preferences |
 | F1 | Keyboard shortcuts |
 | Ctrl+Q | Quit |

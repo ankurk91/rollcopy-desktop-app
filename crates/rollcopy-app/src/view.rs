@@ -10,7 +10,7 @@ use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, Theme};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _, Theme};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rollcopy_device::{DeviceInfo, NoDeviceHint, Phase};
@@ -47,6 +47,7 @@ actions!(
         CheckForUpdates,
         ViewOnGitHub,
         ReportIssue,
+        ReloadLibrary,
         ShowAbout,
         ShowShortcuts,
         Quit,
@@ -84,6 +85,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-,", OpenPreferences, None),
         KeyBinding::new("ctrl-q", Quit, None),
         KeyBinding::new("f1", ShowShortcuts, None),
+        KeyBinding::new("f5", ReloadLibrary, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-r", ReloadLibrary, Some(KEY_CONTEXT)),
     ]);
 }
 
@@ -189,6 +192,8 @@ pub struct MainView {
     pub(crate) preview_w: f32,
     /// One-line status under the preview ("Opening IMG_0042.MOV…").
     pub(crate) status: Option<String>,
+    /// A Reload is running; the current list stays until the new one comes.
+    pub(crate) reloading: bool,
     pub(crate) transfers: Transfers,
     /// Copy of the saved preferences, refreshed when they change.
     pub(crate) config: crate::config::Config,
@@ -303,6 +308,7 @@ impl MainView {
             tile: crate::grid::MIN_TILE,
             preview_w: saved_ui.preview_width.max(PREVIEW_MIN_W),
             status: None,
+            reloading: false,
             transfers: Transfers {
                 expanded: saved_ui.transfers_expanded,
                 ..Transfers::default()
@@ -345,6 +351,7 @@ impl MainView {
                 eprintln!("phase: {}", phase_label(&p));
                 let same_phone = p.udid().is_some() && p.udid() == self.phase.udid();
                 if !matches!(p, Phase::Ready { .. }) || !same_phone {
+                    self.reloading = false;
                     self.library = LibState::None;
                     self.selection = Selection::All;
                     self.show_details = false;
@@ -360,19 +367,52 @@ impl MainView {
                 }
             }
             Event::Queue(ev) => self.on_queue_event(ev),
-            Event::LibraryLoading => self.library = LibState::Loading,
+            Event::LibraryLoading => {
+                if !(self.reloading && matches!(self.library, LibState::Loaded { .. })) {
+                    self.library = LibState::Loading;
+                }
+            }
             Event::Library(Ok(mut library)) => {
                 dev_repeat(&mut library);
                 let tree = LibraryTree::build(&library.assets, self.config.library.show_hidden);
-                self.expanded.clear();
-                if let Some(newest) = tree.years.first() {
-                    self.expanded.insert(newest.year);
+                let reloaded = std::mem::take(&mut self.reloading);
+                // After a reload, keep the place: indices change, device
+                // paths don't.
+                let focused = self
+                    .focused
+                    .and_then(|i| self.assets().get(i))
+                    .map(|a| a.device_path());
+                if reloaded {
+                    let n = library.assets.len() as isize - self.assets().len() as isize;
+                    self.status = Some(match n {
+                        0 => "Up to date".to_owned(),
+                        n if n > 0 => format!("{n} new item{}", if n == 1 { "" } else { "s" }),
+                        n => format!("{} item{} removed", -n, if n == -1 { "" } else { "s" }),
+                    });
+                } else {
+                    self.expanded.clear();
+                    if let Some(newest) = tree.years.first() {
+                        self.expanded.insert(newest.year);
+                    }
                 }
                 self.library = LibState::Loaded { library, tree };
+                self.focused = focused
+                    .and_then(|key| self.assets().iter().position(|a| a.device_path() == key));
+                let keys: HashSet<String> = self.assets().iter().map(|a| a.device_path()).collect();
+                self.selected.retain(|k| keys.contains(k));
                 self.forget_hidden_thumbs(cx);
+                self.counts_dirty = true;
                 self.recompute_visible();
             }
-            Event::Library(Err(e)) => self.library = LibState::Failed(e),
+            Event::Library(Err(e)) => {
+                if std::mem::take(&mut self.reloading)
+                    && matches!(self.library, LibState::Loaded { .. })
+                {
+                    self.status = Some(format!("Couldn't reload: {e}"));
+                } else {
+                    self.library = LibState::Failed(e);
+                }
+            }
             Event::Thumb { key, path } => {
                 self.thumbs.insert(key, Thumb::Ready(path));
             }
@@ -384,6 +424,20 @@ impl MainView {
                 self.status = Some(format!("Couldn't open {name}: {error}"))
             }
         }
+    }
+
+    /// Reads the phone's library again, keeping the current list on screen
+    /// until the new one arrives (F5).
+    pub(crate) fn reload_library(&mut self) {
+        let Some(udid) = self.udid().map(str::to_owned) else {
+            return;
+        };
+        if self.reloading || !matches!(self.library, LibState::Loaded { .. }) {
+            return;
+        }
+        self.reloading = true;
+        self.status = Some("Reloading from the iPhone…".into());
+        let _ = self.commands.try_send(Command::Reload { udid });
     }
 
     /// Rebuilds the tree after the Hidden-album preference changed.
@@ -601,6 +655,7 @@ impl MainView {
             Phase::NoDevice { .. } | Phase::UsbmuxdMissing => "No iPhone connected".into(),
             _ => "Connecting…".into(),
         };
+        let ready = matches!(self.library, LibState::Loaded { .. });
         h_flex()
             .w_full()
             .px_4()
@@ -615,6 +670,16 @@ impl MainView {
             .children(save_to)
             .child(div().flex_1())
             .child(self.render_app_menu())
+            .child(
+                btn("prefs")
+                    .xsmall()
+                    .ghost()
+                    .icon(IconName::Settings)
+                    .tooltip("Preferences (Ctrl+,)")
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(OpenPreferences), cx)
+                    }),
+            )
             .child(
                 btn("theme-toggle")
                     .xsmall()
@@ -634,11 +699,33 @@ impl MainView {
                     })),
             )
             .child(
+                btn("github")
+                    .xsmall()
+                    .ghost()
+                    .icon(IconName::Github)
+                    .tooltip("Rollcopy on GitHub")
+                    .on_click(|_, _, cx| cx.open_url(crate::update::REPO_URL)),
+            )
+            .child(
                 div()
                     .text_sm()
                     .text_color(theme.muted_foreground)
                     .child(status),
             )
+            .when(ready, |d| {
+                d.child(
+                    btn("reload")
+                        .xsmall()
+                        .ghost()
+                        .icon(IconName::RefreshCw)
+                        .tooltip("Reload from iPhone (F5)")
+                        .disabled(self.reloading)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.reload_library();
+                            cx.notify();
+                        })),
+                )
+            })
     }
 
     // ---- left pane ---------------------------------------------------
@@ -917,6 +1004,14 @@ impl MainView {
                         cx.notify();
                     }))
                     .into_any_element(),
+                (_, Selection::Hidden) => div()
+                    .w(px(16.))
+                    .child(Icon::new(IconName::EyeOff).xsmall())
+                    .into_any_element(),
+                (_, Selection::RecentlyDeleted) => div()
+                    .w(px(16.))
+                    .child(Icon::new(IconName::Trash).xsmall())
+                    .into_any_element(),
                 _ => div().w(px(16.)).into_any_element(),
             })
             .child(div().flex_1().child(label))
@@ -1008,6 +1103,11 @@ impl Render for MainView {
             }))
             .on_drag_move(cx.listener(Self::resize_preview))
             .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
+            .on_action(cx.listener(|this, _: &ReportIssue, _, cx| this.report_issue(cx)))
+            .on_action(cx.listener(|this, _: &ReloadLibrary, _, cx| {
+                this.reload_library();
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &ShowShortcuts, _, cx| {
                 this.shortcuts_open = true;
                 cx.notify();

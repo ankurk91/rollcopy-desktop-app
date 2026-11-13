@@ -17,7 +17,7 @@ use crate::view::{
 
 /// Path the app icon is served under (see `main.rs` asset source).
 pub const APP_ICON: &str = "rollcopy/app-icon.svg";
-const GIT_HASH: &str = env!("ROLLCOPY_GIT_HASH");
+pub(crate) const GIT_HASH: &str = env!("ROLLCOPY_GIT_HASH");
 /// Once-a-day limit for the automatic startup check.
 const DAY_SECS: i64 = 24 * 60 * 60;
 
@@ -45,6 +45,7 @@ pub(crate) const SHORTCUTS: &[(&str, &str)] = &[
         "Space / Enter / double-click",
         "View the item full-window (videos: open the player)",
     ),
+    ("F5 / Ctrl+R", "Reload the library from the iPhone"),
     ("Ctrl+,", "Preferences"),
     ("F1", "This list"),
     ("Ctrl+Q", "Quit"),
@@ -122,44 +123,32 @@ impl MainView {
         self.check_for_updates(false, cx);
     }
 
+    /// Phone model and iOS version for bug reports (never its name or serial).
+    pub(crate) fn phone_summary(&self) -> Option<String> {
+        match &self.phase {
+            rollcopy_device::Phase::Ready { info } => Some(format!(
+                "{} on iOS {} ({})",
+                info.model, info.ios_version, info.build_version
+            )),
+            _ => None,
+        }
+    }
+
     fn debug_info(&self) -> String {
-        let os = std::fs::read_to_string("/etc/os-release")
-            .ok()
-            .and_then(|s| {
-                s.lines()
-                    .find_map(|l| l.strip_prefix("PRETTY_NAME="))
-                    .map(|v| v.trim_matches('"').to_owned())
-            })
-            .unwrap_or_else(|| "unknown".into());
-        let desktop = format!(
-            "{} ({})",
-            std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "unknown".into()),
-            std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unknown".into())
-        );
-        let usbmuxd = std::process::Command::new("usbmuxd")
-            .arg("--version")
-            .output()
-            .ok()
-            .map(|o| {
-                let text = String::from_utf8_lossy(&o.stdout).to_string()
-                    + &String::from_utf8_lossy(&o.stderr);
-                text.lines().next().unwrap_or("").trim().to_owned()
-            })
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "not found".into());
-        let phone = match &self.phase {
-            rollcopy_device::Phase::Ready { info } => {
-                format!(
-                    "{} on iOS {} ({})",
-                    info.model, info.ios_version, info.build_version
-                )
-            }
-            _ => "not connected".into(),
-        };
-        format!(
-            "Rollcopy {} ({GIT_HASH})\nOS: {os}\nDesktop: {desktop}\nusbmuxd: {usbmuxd}\nPhone: {phone}",
-            update::current_version()
-        )
+        crate::report::DebugInfo::collect(self.phone_summary()).text()
+    }
+
+    /// Opens the bug-report form with version, OS and phone model filled in.
+    pub(crate) fn report_issue(&self, cx: &mut Context<Self>) {
+        let phone = self.phone_summary();
+        let task = cx
+            .background_executor()
+            .spawn(async move { crate::report::DebugInfo::collect(phone).issue_url() });
+        cx.spawn(async move |_, cx| {
+            let url = task.await;
+            cx.update(|cx| cx.open_url(&url));
+        })
+        .detach();
     }
 
     pub(crate) fn render_about(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

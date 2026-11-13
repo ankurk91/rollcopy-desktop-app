@@ -93,8 +93,8 @@ fn pages() -> Vec<SettingPage> {
                             "Folder layout",
                             SettingField::dropdown(
                                 options(&[
-                                    ("by-date", "Year / Month / images·videos"),
-                                    ("flat", "Flat (one folder)"),
+                                    ("by-date", "By date"),
+                                    ("flat", "One folder"),
                                 ]),
                                 |cx| match Prefs::get(cx).config.destination.layout {
                                     LayoutPref::ByDate => "by-date".into(),
@@ -110,7 +110,10 @@ fn pages() -> Vec<SettingPage> {
                                 },
                             ),
                         )
-                        .description("By the date each item was taken, in its own time zone."),
+                        .description(
+                            "By date: 2026/11/images/IMG_0001.JPG, using the date each item was \
+                             taken in its own time zone. One folder: everything side by side.",
+                        ),
                     )
                     .item(SettingItem::new(
                         "When a file already exists",
@@ -183,8 +186,8 @@ fn pages() -> Vec<SettingPage> {
                             "Videos",
                             SettingField::dropdown(
                                 options(&[
-                                    ("lossless", "Lossless MP4 (original quality)"),
-                                    ("h264", "Re-encode to H.264 (old devices)"),
+                                    ("lossless", "Lossless MP4"),
+                                    ("h264", "H.264 (slower)"),
                                 ]),
                                 |cx| match Prefs::get(cx).config.conversion.video {
                                     VideoPref::Lossless => "lossless".into(),

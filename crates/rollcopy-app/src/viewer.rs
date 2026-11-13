@@ -224,9 +224,17 @@ impl MainView {
                         .relative()
                         .flex_1()
                         .min_h_0()
-                        .px(px(64.))
-                        .pb_4()
-                        .child(image)
+                        // Absolute, so the image gets a definite box and is
+                        // scaled into it instead of spilling out at full size.
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .bottom_4()
+                                .left(px(64.))
+                                .right(px(64.))
+                                .child(image),
+                        )
                         .when_some(overlay, |d, o| {
                             d.child(
                                 div()

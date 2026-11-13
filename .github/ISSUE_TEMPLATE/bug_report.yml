@@ -1,0 +1,62 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! *Menu → Report an Issue* in Rollcopy fills in the details below.
+        Please don't include photos, file names or your phone's name or serial number.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: And what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Connect the iPhone
+        2. Select a month and press Copy
+        3. …
+  - type: input
+    id: version
+    attributes:
+      label: Rollcopy version
+      placeholder: 0.1.0 (abc1234)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Linux distribution
+      placeholder: Ubuntu 24.04 LTS
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop and session
+      placeholder: GNOME (wayland)
+  - type: input
+    id: usbmuxd
+    attributes:
+      label: usbmuxd version
+  - type: input
+    id: ffmpeg
+    attributes:
+      label: ffmpeg version
+  - type: input
+    id: phone
+    attributes:
+      label: iPhone model and iOS version
+      placeholder: iPhone 15 on iOS 26.1
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installed from
+      options:
+        - .deb
+        - AppImage
+        - Built from source

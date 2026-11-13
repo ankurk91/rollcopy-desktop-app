@@ -58,6 +58,10 @@ pub enum Command {
         name: String,
     },
     Queue(QueueCommand),
+    /// Read the phone's library again (new photos since it was plugged in).
+    Reload {
+        udid: String,
+    },
     /// Fetch a full-size photo for the viewer into `dest` (HEIC → JPG).
     FullImage {
         udid: String,
@@ -112,12 +116,13 @@ impl CachePaths {
             .join(name)
     }
 
-    /// Full-size image for the viewer: `view/<udid>/<dir>/<file>[.e<edit>].<ext>`,
-    /// with HEIC stored as JPG. Cleared at startup.
+    /// Screen-sized image for the viewer: `view/<udid>/<dir>/<file>[.e<edit>].jpg`
+    /// (other formats keep their extension and are shown as they are).
+    /// Cleared at startup and quit.
     pub fn view(&self, udid: &str, a: &Asset) -> PathBuf {
         let plan = a.save_plan();
         let ext = match plan.from_ext.as_str() {
-            "HEIC" | "HEIF" => "jpg".to_owned(),
+            "HEIC" | "HEIF" | "JPG" | "JPEG" | "PNG" => "jpg".to_owned(),
             other => other.to_ascii_lowercase(),
         };
         let name = match (a.is_edited(), a.edited_at) {
@@ -196,13 +201,15 @@ pub fn spawn(paths: CachePaths) -> Worker {
                 tokio::spawn(crate::instance::serve(ev_tx.clone()));
                 start_tray(tray_rx, ev_tx.clone());
                 let queue = start_queue(&paths, ev_tx.clone());
+                let loads = Loader::default();
                 tokio::spawn(serve_commands(
                     cmd_rx,
                     ev_tx.clone(),
                     paths.clone(),
                     queue.clone(),
+                    loads.clone(),
                 ));
-                run_watch(ev_tx, paths, queue).await;
+                run_watch(ev_tx, paths, queue, loads).await;
             });
         })
         .expect("spawn device thread");
@@ -260,13 +267,44 @@ fn start_queue(paths: &CachePaths, tx: async_channel::Sender<Event>) -> QueueHan
     handle
 }
 
-async fn run_watch(tx: async_channel::Sender<Event>, paths: CachePaths, queue: QueueHandle) {
-    let mut loading: Option<tokio::task::JoinHandle<()>> = None;
-    rollcopy_device::watch(move |phase| {
-        // Any change of phase invalidates a library load in progress.
-        if let Some(task) = loading.take() {
+/// The library load in progress, shared by the watcher (phone became
+/// ready) and the Reload command, so a new load always replaces the old one.
+#[derive(Clone, Default)]
+struct Loader(std::sync::Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>);
+
+impl Loader {
+    fn cancel(&self) {
+        if let Some(task) = self.0.lock().unwrap_or_else(|e| e.into_inner()).take() {
             task.abort();
         }
+    }
+
+    fn start(&self, tx: async_channel::Sender<Event>, udid: String, dir: PathBuf) {
+        let task = tokio::spawn(async move {
+            let _ = tx.send(Event::LibraryLoading).await;
+            let result = load_library(&udid, dir).await;
+            let _ = tx.send(Event::Library(result)).await;
+        });
+        if let Some(old) = self
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .replace(task)
+        {
+            old.abort();
+        }
+    }
+}
+
+async fn run_watch(
+    tx: async_channel::Sender<Event>,
+    paths: CachePaths,
+    queue: QueueHandle,
+    loads: Loader,
+) {
+    rollcopy_device::watch(move |phase| {
+        // Any change of phase invalidates a library load in progress.
+        loads.cancel();
         let ready_udid = match &phase {
             Phase::Ready { info } => Some(info.udid.clone()),
             _ => None,
@@ -282,12 +320,7 @@ async fn run_watch(tx: async_channel::Sender<Event>, paths: CachePaths, queue: Q
         let _ = tx.try_send(Event::Phase(phase));
         if let Some(udid) = ready_udid {
             let dir = paths.db(&udid);
-            let tx = tx.clone();
-            loading = Some(tokio::spawn(async move {
-                let _ = tx.send(Event::LibraryLoading).await;
-                let result = load_library(&udid, dir).await;
-                let _ = tx.send(Event::Library(result)).await;
-            }));
+            loads.start(tx.clone(), udid, dir);
         }
     })
     .await;
@@ -324,6 +357,7 @@ async fn serve_commands(
     tx: async_channel::Sender<Event>,
     paths: CachePaths,
     transfers: QueueHandle,
+    loads: Loader,
 ) {
     // Thumbnail queue, newest first; `queued` de-duplicates keys.
     let mut queue: VecDeque<(String, ThumbReq)> = VecDeque::new();
@@ -346,6 +380,14 @@ async fn serve_commands(
         for cmd in incoming {
             match cmd {
                 Command::Queue(cmd) => transfers.send(cmd),
+                Command::Reload { udid } => {
+                    // Thumbnails of the old list may be gone; the UI asks
+                    // again for what is on screen.
+                    queue.clear();
+                    queued.clear();
+                    let dir = paths.db(&udid);
+                    loads.start(tx.clone(), udid, dir);
+                }
                 Command::Thumbs { udid, items } => {
                     for item in items.into_iter().rev() {
                         if queued.insert(item.key.clone()) {
@@ -444,7 +486,13 @@ fn part_path(dest: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// Copies a photo from the phone for the viewer, converting HEIC to JPG.
+/// Longest side of viewer images: sharp on a 4K screen, a fraction of a
+/// 48 MP photo's memory (audit PERF-01).
+const VIEW_MAX_SIDE: u32 = 3000;
+
+/// Copies a photo from the phone for the viewer as an upright, screen-sized
+/// JPEG (HEIC decoded, EXIF rotation applied). Formats that can't be read
+/// are shown as they are.
 async fn fetch_full(udid: &str, source: &str, dest: &Path) -> Result<(), DeviceError> {
     if tokio::fs::try_exists(dest).await.unwrap_or(false) {
         return Ok(());
@@ -455,28 +503,28 @@ async fn fetch_full(udid: &str, source: &str, dest: &Path) -> Result<(), DeviceE
     let mut conn = None;
     connect(&mut conn, udid).await?;
     let fs = &mut conn.as_mut().expect("connected").fs;
-    let is_heic = source.to_ascii_lowercase().ends_with(".heic")
-        || source.to_ascii_lowercase().ends_with(".heif");
     let part = part_path(dest);
-    if is_heic {
-        let raw = part_path(&part);
-        fs.copy_to_local(source, &raw, |_| {}).await?;
-        let (src, out) = (raw.clone(), part.clone());
-        let converted = tokio::task::spawn_blocking(move || {
-            rollcopy_convert::heic_to_jpeg(&src, &out, 90).map(|_| ())
-        })
-        .await;
-        let _ = tokio::fs::remove_file(&raw).await;
-        match converted {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(DeviceError::Other(e.to_string())),
-            Err(e) => return Err(DeviceError::Other(e.to_string())),
+    // Keep the source's extension: the decoder goes by it for HEIC.
+    let ext = source.rsplit_once('.').map_or("", |(_, e)| e);
+    let raw = dest.with_extension(format!("raw.{ext}"));
+    fs.copy_to_local(source, &raw, |_| {}).await?;
+    let (src, out) = (raw.clone(), part.clone());
+    let converted = tokio::task::spawn_blocking(move || {
+        rollcopy_convert::display_jpeg(&src, &out, VIEW_MAX_SIDE)
+    })
+    .await;
+    let result = match converted {
+        Ok(Ok(_)) => tokio::fs::rename(&part, dest).await,
+        // Not a format we decode (GIF, …): show the original.
+        Ok(Err(_)) if !matches!(ext.to_ascii_lowercase().as_str(), "heic" | "heif") => {
+            tokio::fs::rename(&raw, dest).await
         }
-    } else {
-        fs.copy_to_local(source, &part, |_| {}).await?;
-    }
-    tokio::fs::rename(&part, dest).await?;
-    Ok(())
+        Ok(Err(e)) => Err(std::io::Error::other(e.to_string())),
+        Err(e) => Err(std::io::Error::other(e.to_string())),
+    };
+    let _ = tokio::fs::remove_file(&raw).await;
+    let _ = tokio::fs::remove_file(&part).await;
+    result.map_err(|e| DeviceError::Other(e.to_string()))
 }
 
 async fn open_file(

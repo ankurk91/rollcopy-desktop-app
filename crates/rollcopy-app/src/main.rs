@@ -9,6 +9,7 @@ mod notify;
 mod prefs;
 mod prefs_window;
 mod preview;
+mod report;
 mod theme;
 mod transfers;
 mod tray;
@@ -40,6 +41,9 @@ gpui_kit_assets::icon_assets!(
         ChevronLeft,
         ChevronRight,
         Copy,
+        EyeOff,
+        Github,
+        Settings,
         FolderCheck,
         FolderOpen,
         Menu,
@@ -143,7 +147,10 @@ fn main() {
         // it can save its state.
         cx.on_action(|_: &view::OpenPreferences, cx| prefs_window::open(cx));
         cx.on_action(|_: &view::ViewOnGitHub, cx| cx.open_url(update::REPO_URL));
-        cx.on_action(|_: &view::ReportIssue, cx| cx.open_url(update::ISSUES_URL));
+        // The main window answers this itself, adding the phone model.
+        cx.on_action(|_: &view::ReportIssue, cx| {
+            cx.open_url(&report::DebugInfo::collect(None).issue_url())
+        });
         cx.on_action(|_: &view::Quit, cx| cx.quit());
         // Session-only files (viewer images, opened files) go at quit.
         cx.on_app_quit(move |_| {

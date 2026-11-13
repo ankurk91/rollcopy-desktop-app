@@ -30,9 +30,19 @@ fn heif_err(e: libheif_rs::HeifError) -> ConvertError {
     ConvertError::Decode(e.to_string())
 }
 
-/// Converts the primary image of a HEIC/HEIF file to a JPEG at `dst`
-/// (overwritten). Blocking and CPU-heavy: run it on a worker thread.
-pub fn heic_to_jpeg(src: &Path, dst: &Path, quality: u8) -> Result<JpegInfo, ConvertError> {
+/// A decoded HEIC: rotated RGB pixels plus the metadata worth keeping.
+pub(crate) struct Decoded {
+    pub width: u32,
+    pub height: u32,
+    pub rgb: Vec<u8>,
+    pub icc: Option<Vec<u8>>,
+    /// EXIF as raw TIFF, orientation reset to 1.
+    pub exif: Option<Vec<u8>>,
+}
+
+/// Decodes the primary image of a HEIC/HEIF file. libheif applies the
+/// stored rotation and mirroring.
+pub(crate) fn decode_heic(src: &Path) -> Result<Decoded, ConvertError> {
     let src_str = src
         .to_str()
         .ok_or_else(|| ConvertError::Decode("source path is not UTF-8".into()))?;
@@ -49,26 +59,45 @@ pub fn heic_to_jpeg(src: &Path, dst: &Path, quality: u8) -> Result<JpegInfo, Con
         .ok_or_else(|| ConvertError::Decode("no interleaved RGB plane".into()))?;
     let (w, h) = (plane.width, plane.height);
     let row = w as usize * 3;
-    let mut rgb = Vec::with_capacity(row * h as usize);
-    for y in 0..h as usize {
-        let start = y * plane.stride;
-        rgb.extend_from_slice(
-            plane
-                .data
-                .get(start..start + row)
-                .ok_or_else(|| ConvertError::Decode("short pixel row".into()))?,
-        );
-    }
-
-    let exif = read_exif(&handle);
-    let icc = handle.color_profile_raw().map(|p| p.data);
-    let info = JpegInfo {
+    let rgb = if plane.stride == row {
+        // Rows are already packed (audit PERF-06).
+        plane
+            .data
+            .get(..row * h as usize)
+            .ok_or_else(|| ConvertError::Decode("short pixel data".into()))?
+            .to_vec()
+    } else {
+        let mut rgb = Vec::with_capacity(row * h as usize);
+        for y in 0..h as usize {
+            let start = y * plane.stride;
+            rgb.extend_from_slice(
+                plane
+                    .data
+                    .get(start..start + row)
+                    .ok_or_else(|| ConvertError::Decode("short pixel row".into()))?,
+            );
+        }
+        rgb
+    };
+    Ok(Decoded {
         width: w,
         height: h,
-        has_exif: exif.is_some(),
-        has_icc: icc.is_some(),
-    };
+        rgb,
+        icc: handle.color_profile_raw().map(|p| p.data),
+        exif: read_exif(&handle),
+    })
+}
 
+/// Writes RGB pixels as a JPEG at `dst` (overwritten), with an optional
+/// colour profile and EXIF, and syncs it to disk.
+pub(crate) fn write_jpeg(
+    dst: &Path,
+    rgb: &[u8],
+    (w, h): (u32, u32),
+    quality: u8,
+    icc: Option<Vec<u8>>,
+    exif: Option<Vec<u8>>,
+) -> Result<(), ConvertError> {
     let mut out = BufWriter::new(File::create(dst)?);
     let mut enc = JpegEncoder::new_with_quality(&mut out, quality);
     if let Some(icc) = icc {
@@ -79,12 +108,26 @@ pub fn heic_to_jpeg(src: &Path, dst: &Path, quality: u8) -> Result<JpegInfo, Con
         enc.set_exif_metadata(exif)
             .map_err(|e| ConvertError::Encode(e.to_string()))?;
     }
-    enc.write_image(&rgb, w, h, ExtendedColorType::Rgb8)
+    enc.write_image(rgb, w, h, ExtendedColorType::Rgb8)
         .map_err(|e| ConvertError::Encode(e.to_string()))?;
     out.flush()?;
     out.into_inner()
         .map_err(|e| ConvertError::Io(e.into_error()))?
         .sync_all()?;
+    Ok(())
+}
+
+/// Converts the primary image of a HEIC/HEIF file to a JPEG at `dst`
+/// (overwritten). Blocking and CPU-heavy: run it on a worker thread.
+pub fn heic_to_jpeg(src: &Path, dst: &Path, quality: u8) -> Result<JpegInfo, ConvertError> {
+    let d = decode_heic(src)?;
+    let info = JpegInfo {
+        width: d.width,
+        height: d.height,
+        has_exif: d.exif.is_some(),
+        has_icc: d.icc.is_some(),
+    };
+    write_jpeg(dst, &d.rgb, (d.width, d.height), quality, d.icc, d.exif)?;
     Ok(info)
 }
 
