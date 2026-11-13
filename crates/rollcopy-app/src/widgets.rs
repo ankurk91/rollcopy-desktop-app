@@ -39,3 +39,20 @@ pub(crate) fn gb(bytes: u64) -> String {
 pub(crate) fn btn(id: impl Into<ElementId>) -> Button {
     Button::new(id).cursor_pointer()
 }
+
+/// Whether this window draws its own title bar and buttons. GNOME on
+/// Wayland doesn't draw them for apps (no server-side decorations), so
+/// Rollcopy must; window managers that do (Cinnamon, KDE, X11) keep theirs.
+pub(crate) fn client_decorated(window: &Window) -> bool {
+    matches!(window.window_decorations(), Decorations::Client { .. })
+}
+
+/// Which decorations to ask for. Server-side by default; debug builds can
+/// try the client-side look on any desktop with `ROLLCOPY_CSD=1`.
+pub(crate) fn requested_decorations() -> Option<WindowDecorations> {
+    if cfg!(debug_assertions) && std::env::var_os("ROLLCOPY_CSD").is_some() {
+        Some(WindowDecorations::Client)
+    } else {
+        None
+    }
+}

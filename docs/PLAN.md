@@ -418,6 +418,7 @@ The device, library, convert and queue crates have no UI dependency, so they can
 
 **Still to test**
 - Wayland session (only X11 tested so far) and GNOME (its tray needs the AppIndicator extension).
+- **GNOME on Wayland has no server-side window decorations** (found on Ubuntu 26.04 in a VM, 2026-11-13): the window had no title bar or buttons. Rollcopy now draws its own when `window.window_decorations()` is `Client`. The toolbar sits inside gpui-component's `TitleBar` (drag to move, double-click to maximise, minimise/maximise/close), both windows get `window_border` for resize edges, and the × goes through the same close checks as the window manager's. Under server-side decorations nothing changes. `ROLLCOPY_CSD=1` (debug builds) requests client-side decorations to test this on X11. The window-button icons must be in the app's icon list, or the buttons draw nothing.
 - A long copy with the phone auto-locking.
 - Re-pairing after the phone forgets this computer (`InvalidHostID` path).
 - A second device (another iPhone, an iPad).

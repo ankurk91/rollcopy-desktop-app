@@ -54,6 +54,7 @@ actions!(
         ViewOnGitHub,
         ReportIssue,
         ReloadLibrary,
+        CloseWindow,
         ShowAbout,
         ShowShortcuts,
         Quit,
@@ -477,7 +478,7 @@ impl Render for MainView {
         let center = self.render_center(window, cx);
         let transfers = self.render_transfers(window, cx);
         let conflict = self.render_conflict(cx);
-        let toolbar = self.render_toolbar(cx).into_any_element();
+        let toolbar = self.render_toolbar(window, cx);
         // The preview pane and viewer need the focused item's thumbnail even
         // when the grid didn't ask for it (list view loads none).
         if (self.preview_open || self.viewer_open)
@@ -488,101 +489,111 @@ impl Render for MainView {
         let viewer = self.render_viewer(window, cx);
         let ready = matches!(self.library, LibState::Loaded { .. })
             && matches!(self.phase, Phase::Ready { .. });
-        v_flex()
-            .track_focus(&self.focus)
-            .key_context(KEY_CONTEXT)
-            .on_action(cx.listener(Self::select_all))
-            .on_action(cx.listener(Self::clear_selection))
-            .on_action(cx.listener(|this, _: &MoveLeft, _, cx| this.key_move(-1, false, cx)))
-            .on_action(cx.listener(|this, _: &MoveRight, _, cx| this.key_move(1, false, cx)))
-            .on_action(cx.listener(|this, _: &MoveUp, _, cx| {
-                if this.viewer_open {
-                    return;
-                }
-                let d = this.row_delta();
-                this.key_move(-d, false, cx)
-            }))
-            .on_action(cx.listener(|this, _: &MoveDown, _, cx| {
-                if this.viewer_open {
-                    return;
-                }
-                let d = this.row_delta();
-                this.key_move(d, false, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ExtendLeft, _, cx| this.key_move(-1, true, cx)))
-            .on_action(cx.listener(|this, _: &ExtendRight, _, cx| this.key_move(1, true, cx)))
-            .on_action(cx.listener(|this, _: &ExtendUp, _, cx| {
-                if this.viewer_open {
-                    return;
-                }
-                let d = this.row_delta();
-                this.key_move(-d, true, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ExtendDown, _, cx| {
-                if this.viewer_open {
-                    return;
-                }
-                let d = this.row_delta();
-                this.key_move(d, true, cx)
-            }))
-            .on_action(cx.listener(|this, _: &OpenItem, _, cx| {
-                this.activate_focused();
-                cx.notify();
-            }))
-            .on_drag_move(cx.listener(Self::resize_preview))
-            .on_drag_move(cx.listener(Self::resize_transfers))
-            .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
-            .on_action(cx.listener(|this, _: &ReportIssue, _, cx| this.report_issue(cx)))
-            .on_action(cx.listener(|this, _: &ReloadLibrary, _, cx| {
-                this.reload_library();
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &ShowShortcuts, _, cx| {
-                this.shortcuts_open = true;
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &ShowAbout, _, cx| {
-                this.about_open = true;
-                this.about_note = None;
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &CheckForUpdates, _, cx| {
-                this.check_for_updates(true, cx);
-                cx.notify();
-            }))
-            .size_full()
-            .relative()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .child(toolbar)
-            .children(self.render_update_banner(cx))
-            .children(Prefs::get(cx).notice.clone().map(|n| {
-                div()
-                    .w_full()
-                    .px_4()
-                    .py_1()
-                    .text_sm()
-                    .bg(theme.warning.opacity(0.15))
-                    .child(n)
-            }))
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .child(self.render_left(cx))
-                    .child(div().flex_1().h_full().min_w_0().child(center))
-                    .when(ready && self.preview_open, |d| {
-                        d.child(self.render_preview(cx))
-                    }),
-            )
-            .children(transfers)
-            .children(conflict)
-            .children(viewer)
-            .children(self.render_about(cx))
-            .children(self.render_shortcuts(cx))
-            .children(self.render_update_dialog(cx))
-            .children(self.render_quit_prompt(cx))
+        // Resize edges and shadow when Rollcopy draws its own frame; a plain
+        // wrapper otherwise.
+        gpui_kit::component::window_border().child(
+            v_flex()
+                .track_focus(&self.focus)
+                .key_context(KEY_CONTEXT)
+                .on_action(cx.listener(Self::select_all))
+                .on_action(cx.listener(Self::clear_selection))
+                .on_action(cx.listener(|this, _: &MoveLeft, _, cx| this.key_move(-1, false, cx)))
+                .on_action(cx.listener(|this, _: &MoveRight, _, cx| this.key_move(1, false, cx)))
+                .on_action(cx.listener(|this, _: &MoveUp, _, cx| {
+                    if this.viewer_open {
+                        return;
+                    }
+                    let d = this.row_delta();
+                    this.key_move(-d, false, cx)
+                }))
+                .on_action(cx.listener(|this, _: &MoveDown, _, cx| {
+                    if this.viewer_open {
+                        return;
+                    }
+                    let d = this.row_delta();
+                    this.key_move(d, false, cx)
+                }))
+                .on_action(cx.listener(|this, _: &ExtendLeft, _, cx| this.key_move(-1, true, cx)))
+                .on_action(cx.listener(|this, _: &ExtendRight, _, cx| this.key_move(1, true, cx)))
+                .on_action(cx.listener(|this, _: &ExtendUp, _, cx| {
+                    if this.viewer_open {
+                        return;
+                    }
+                    let d = this.row_delta();
+                    this.key_move(-d, true, cx)
+                }))
+                .on_action(cx.listener(|this, _: &ExtendDown, _, cx| {
+                    if this.viewer_open {
+                        return;
+                    }
+                    let d = this.row_delta();
+                    this.key_move(d, true, cx)
+                }))
+                .on_action(cx.listener(|this, _: &OpenItem, _, cx| {
+                    this.activate_focused();
+                    cx.notify();
+                }))
+                .on_drag_move(cx.listener(Self::resize_preview))
+                .on_drag_move(cx.listener(Self::resize_transfers))
+                .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
+                .on_action(cx.listener(|this, _: &ReportIssue, _, cx| this.report_issue(cx)))
+                // Our own title bar's ×: same checks as the window manager's.
+                .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                    if this.confirm_close(window, cx) {
+                        window.remove_window();
+                    }
+                }))
+                .on_action(cx.listener(|this, _: &ReloadLibrary, _, cx| {
+                    this.reload_library();
+                    cx.notify();
+                }))
+                .on_action(cx.listener(|this, _: &ShowShortcuts, _, cx| {
+                    this.shortcuts_open = true;
+                    cx.notify();
+                }))
+                .on_action(cx.listener(|this, _: &ShowAbout, _, cx| {
+                    this.about_open = true;
+                    this.about_note = None;
+                    cx.notify();
+                }))
+                .on_action(cx.listener(|this, _: &CheckForUpdates, _, cx| {
+                    this.check_for_updates(true, cx);
+                    cx.notify();
+                }))
+                .size_full()
+                .relative()
+                .bg(theme.background)
+                .text_color(theme.foreground)
+                .child(toolbar)
+                .children(self.render_update_banner(cx))
+                .children(Prefs::get(cx).notice.clone().map(|n| {
+                    div()
+                        .w_full()
+                        .px_4()
+                        .py_1()
+                        .text_sm()
+                        .bg(theme.warning.opacity(0.15))
+                        .child(n)
+                }))
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .child(self.render_left(cx))
+                        .child(div().flex_1().h_full().min_w_0().child(center))
+                        .when(ready && self.preview_open, |d| {
+                            d.child(self.render_preview(cx))
+                        }),
+                )
+                .children(transfers)
+                .children(conflict)
+                .children(viewer)
+                .children(self.render_about(cx))
+                .children(self.render_shortcuts(cx))
+                .children(self.render_update_dialog(cx))
+                .children(self.render_quit_prompt(cx)),
+        )
     }
 }
 

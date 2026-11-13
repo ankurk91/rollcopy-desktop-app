@@ -34,6 +34,7 @@ pub fn open(cx: &mut App) {
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::centered(size(px(760.), px(580.)), cx)),
         app_id: Some(APP_ID.into()),
+        window_decorations: crate::widgets::requested_decorations(),
         window_min_size: Some(size(px(560.), px(400.))),
         titlebar: Some(TitlebarOptions {
             title: Some("Rollcopy Preferences".into()),
@@ -482,30 +483,41 @@ impl Render for PrefsView {
         let settings =
             RenderOnce::render(Settings::new("rollcopy-prefs").pages(pages()), window, cx)
                 .into_any_element();
-        v_flex()
-            .size_full()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .when_some(notice, |d, n| {
-                d.child(
+        let csd = crate::widgets::client_decorated(window);
+        gpui_kit::component::window_border().child(
+            v_flex()
+                .size_full()
+                .bg(theme.background)
+                .text_color(theme.foreground)
+                // GNOME on Wayland: draw the title bar and window buttons.
+                .when(csd, |d| {
+                    d.child(
+                        gpui_kit::component::TitleBar::new()
+                            .on_close_window(|_, window, _| window.remove_window())
+                            .child(div().font_weight(FontWeight::SEMIBOLD).child("Preferences")),
+                    )
+                })
+                .when_some(notice, |d, n| {
+                    d.child(
+                        div()
+                            .px_4()
+                            .py_2()
+                            .text_sm()
+                            .bg(theme.warning.opacity(0.15))
+                            .child(n),
+                    )
+                })
+                .child(div().flex_1().min_h_0().child(settings))
+                .child(
                     div()
                         .px_4()
                         .py_2()
-                        .text_sm()
-                        .bg(theme.warning.opacity(0.15))
-                        .child(n),
-                )
-            })
-            .child(div().flex_1().min_h_0().child(settings))
-            .child(
-                div()
-                    .px_4()
-                    .py_2()
-                    .border_t_1()
-                    .border_color(theme.border)
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(format!("Saved automatically to {path}")),
-            )
+                        .border_t_1()
+                        .border_color(theme.border)
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(format!("Saved automatically to {path}")),
+                ),
+        )
     }
 }

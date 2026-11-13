@@ -80,6 +80,11 @@ gpui_kit_assets::icon_assets!(
         Unplug,
         Usb,
         Video,
+        // Window buttons, when Rollcopy draws its own title bar (GNOME/Wayland).
+        WindowClose,
+        WindowMaximize,
+        WindowMinimize,
+        WindowRestore,
     ]
 );
 
@@ -171,6 +176,7 @@ fn main() {
                     .unwrap_or_else(|| WindowBounds::centered(size(px(1100.), px(720.)), cx)),
             ),
             app_id: Some(APP_ID.into()),
+            window_decorations: widgets::requested_decorations(),
             window_min_size: Some(size(px(MIN_W), px(MIN_H))),
             titlebar: Some(TitlebarOptions {
                 title: Some(APP_NAME.into()),

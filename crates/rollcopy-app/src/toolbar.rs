@@ -4,7 +4,7 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::base::h_flex;
 use gpui_kit::component::button::ButtonVariants as _;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _, TitleBar};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rollcopy_device::Phase;
@@ -16,7 +16,29 @@ use crate::view::*;
 use crate::widgets::*;
 
 impl MainView {
-    pub(crate) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The toolbar. Where Rollcopy draws its own window frame (GNOME on
+    /// Wayland), it becomes the title bar: drag it to move the window,
+    /// double-click to maximise, with minimise/maximise/close at the end.
+    pub(crate) fn render_toolbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let bar = self.render_toolbar_row(cx);
+        if client_decorated(window) {
+            TitleBar::new()
+                .on_close_window(|_, window, cx| window.dispatch_action(Box::new(CloseWindow), cx))
+                // Fill the bar but leave room for the window buttons.
+                .child(bar.flex_1().min_w_0().pr_2())
+                .into_any_element()
+        } else {
+            let theme = cx.theme().clone();
+            bar.w_full()
+                .px_4()
+                .py_2()
+                .border_b_1()
+                .border_color(theme.border)
+                .into_any_element()
+        }
+    }
+
+    fn render_toolbar_row(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
         let save_to = self.render_save_to(cx);
         let status = match &self.phase {
@@ -26,13 +48,8 @@ impl MainView {
         };
         let ready = matches!(self.library, LibState::Loaded { .. });
         h_flex()
-            .w_full()
-            .px_4()
-            .py_2()
             .gap_2()
             .items_center()
-            .border_b_1()
-            .border_color(theme.border)
             .child(Icon::new(IconName::Smartphone).small())
             .child(div().font_weight(FontWeight::SEMIBOLD).child("Rollcopy"))
             .child(div().w(px(24.)))
