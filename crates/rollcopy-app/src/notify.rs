@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use zbus::zvariant::Value;
+use zbus::Variant;
 
 /// How long popups stay up; Cinnamon's default is 4 s.
 const EXPIRE_MS: i32 = 10_000;
@@ -38,8 +38,8 @@ pub fn start() {
             }
         };
         while let Ok((summary, body)) = rx.recv().await {
-            let hints: HashMap<&str, Value<'_>> =
-                HashMap::from([("desktop-entry", Value::from(crate::APP_ID))]);
+            let hints: HashMap<&str, Variant<'_>> =
+                HashMap::from([("desktop-entry", Variant::from(crate::APP_ID))]);
             let args = (
                 "Rollcopy",
                 0u32,

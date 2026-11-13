@@ -5634,7 +5634,7 @@ dependencies = [
  "tokio",
  "toml 1.2.1+spec-1.1.0",
  "ureq",
- "zbus 5.19.0",
+ "zbus 6.2.1",
 ]
 
 [[package]]
@@ -8836,6 +8836,7 @@ dependencies = [
  "serde",
  "serde_repr",
  "socket2",
+ "tokio",
  "uds_windows",
  "uuid",
  "windows-sys 0.61.2",

@@ -15,7 +15,7 @@ use std::fs::{File, TryLockError};
 use std::path::Path;
 use std::time::Duration;
 
-use zbus::zvariant::{OwnedValue, Value};
+use zbus::{OwnedVariant, Variant};
 
 use crate::APP_ID;
 use crate::tray::TrayAction;
@@ -67,7 +67,7 @@ pub fn activate_running() -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         let mut last = String::new();
         for _ in 0..20 {
-            let platform_data: HashMap<&str, Value<'_>> = HashMap::new();
+            let platform_data: HashMap<&str, Variant<'_>> = HashMap::new();
             match conn
                 .call_method(
                     Some(APP_ID),
@@ -93,7 +93,7 @@ struct Application {
 
 #[zbus::interface(name = "org.freedesktop.Application")]
 impl Application {
-    async fn activate(&self, _platform_data: HashMap<String, OwnedValue>) {
+    async fn activate(&self, _platform_data: HashMap<String, OwnedVariant>) {
         let _ = self.events.send(Event::Tray(TrayAction::Show)).await;
     }
 }
@@ -102,11 +102,11 @@ impl Application {
 /// Runs on the worker's tokio runtime.
 pub async fn serve(events: async_channel::Sender<Event>) {
     let result = async {
-        let conn = zbus::connection::Builder::session()?
-            .serve_at(OBJECT_PATH, Application { events })?
+        let conn = zbus::connection::Builder::session()
+            .serve_at(OBJECT_PATH, Application { events })
             .build()
             .await?;
-        conn.request_name_with_flags(APP_ID, zbus::fdo::RequestNameFlags::DoNotQueue.into())
+        conn.request_name_with_flags(APP_ID, zbus::fdo::RequestNameFlags::DO_NOT_QUEUE)
             .await?;
         Ok::<_, zbus::Error>(conn)
     }
