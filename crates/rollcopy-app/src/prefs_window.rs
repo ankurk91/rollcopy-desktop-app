@@ -485,7 +485,7 @@ impl Render for PrefsView {
             RenderOnce::render(Settings::new("rollcopy-prefs").pages(pages()), window, cx)
                 .into_any_element();
         let csd = crate::widgets::client_decorated(window);
-        gpui_kit::component::window_border().child(
+        crate::widgets::window_frame().child(
             v_flex()
                 .size_full()
                 .bg(theme.background)

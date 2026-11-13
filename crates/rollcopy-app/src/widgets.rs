@@ -56,3 +56,14 @@ pub(crate) fn requested_decorations() -> Option<WindowDecorations> {
         None
     }
 }
+
+/// The window frame when Rollcopy draws its own (GNOME on Wayland): a 1 px
+/// edge with resize handles, and no drawn shadow. A shadow needs a
+/// see-through margin around the window; with software rendering (virtual
+/// machines, no GPU) that margin came out as a solid grey band, so there is
+/// none. Elsewhere this is a plain wrapper.
+pub(crate) fn window_frame() -> gpui_kit::component::WindowBorder {
+    gpui_kit::component::window_border()
+        .shadow_size(px(0.))
+        .resize_hit_size(px(6.))
+}

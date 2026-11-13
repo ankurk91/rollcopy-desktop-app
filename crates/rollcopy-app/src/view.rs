@@ -491,7 +491,7 @@ impl Render for MainView {
             && matches!(self.phase, Phase::Ready { .. });
         // Resize edges and shadow when Rollcopy draws its own frame; a plain
         // wrapper otherwise.
-        gpui_kit::component::window_border().child(
+        crate::widgets::window_frame().child(
             v_flex()
                 .track_focus(&self.focus)
                 .key_context(KEY_CONTEXT)
