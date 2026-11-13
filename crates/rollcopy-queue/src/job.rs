@@ -61,6 +61,15 @@ pub(crate) struct JobSpec {
     pub staging_dir: PathBuf,
 }
 
+/// A staging file name no other job, queue or Rollcopy process uses:
+/// `<pid>-<n>.<ext>` with `n` counted across the whole process (audit REL-03).
+fn staging_path(dir: &Path, ext: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    dir.join(format!("{}-{n}.{ext}", std::process::id()))
+}
+
 fn with_suffix(p: &Path, suffix: &str) -> PathBuf {
     let mut s = p.as_os_str().to_owned();
     s.push(suffix);
@@ -78,7 +87,7 @@ pub(crate) async fn run(
     let part = with_suffix(&spec.dest, ".part");
     let plan = spec.asset.save_plan();
     let ext = plan.from_ext.to_ascii_lowercase();
-    let staging = spec.staging_dir.join(format!("{}.{ext}", spec.id));
+    let staging = staging_path(&spec.staging_dir, &ext);
 
     let result = run_inner(spec, fs, events, &part, &staging).await;
     if result.is_err() {
@@ -234,6 +243,17 @@ mod tests {
         assert_eq!(work_for("JPEG", "JPG"), Work::Copy);
         assert_eq!(work_for("PNG", "PNG"), Work::Copy);
         assert_eq!(work_for("MP4", "MP4"), Work::Copy);
+    }
+
+    #[test]
+    fn staging_paths_are_unique() {
+        let dir = Path::new("/staging");
+        let a = staging_path(dir, "heic");
+        let b = staging_path(dir, "heic");
+        assert_ne!(a, b);
+        let name = a.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with(&format!("{}-", std::process::id())));
+        assert!(name.ends_with(".heic"));
     }
 
     #[test]

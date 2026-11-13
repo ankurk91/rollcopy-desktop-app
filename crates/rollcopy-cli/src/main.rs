@@ -212,7 +212,8 @@ fn cache_dir(udid: &str) -> PathBuf {
         .filter(|p| p.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
         .unwrap_or_else(std::env::temp_dir);
-    base.join("rollcopy").join("db").join(udid)
+    // Separate from the app's cache so both can run at once.
+    base.join("rollcopy-cli").join("db").join(udid)
 }
 
 fn flags(a: &Asset) -> String {

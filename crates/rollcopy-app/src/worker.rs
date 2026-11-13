@@ -175,6 +175,7 @@ pub fn spawn(paths: CachePaths) -> Worker {
                         "If you can read this, notifications work.",
                     );
                 }
+                tokio::spawn(crate::instance::serve(ev_tx.clone()));
                 start_tray(tray_rx, ev_tx.clone());
                 let queue = start_queue(&paths, ev_tx.clone());
                 tokio::spawn(serve_commands(

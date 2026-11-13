@@ -4,6 +4,7 @@ mod about;
 mod config;
 mod grid;
 mod icons;
+mod instance;
 mod notify;
 mod prefs;
 mod prefs_window;
@@ -22,7 +23,7 @@ use std::borrow::Cow;
 use gpui_kit::*;
 
 const APP_NAME: &str = "Rollcopy";
-const APP_ID: &str = "io.github.ankurk91.Rollcopy";
+pub(crate) const APP_ID: &str = "io.github.ankurk91.Rollcopy";
 /// Smallest main window: room for the side pane and one grid column.
 const MIN_W: f32 = 640.;
 const MIN_H: f32 = 480.;
@@ -119,6 +120,18 @@ fn app_paths() -> worker::CachePaths {
 
 fn main() {
     let paths = app_paths();
+    // Held until exit; the OS releases it even after a crash.
+    let _instance = match instance::lock(&paths.state) {
+        instance::Lock::Held => {
+            match instance::activate_running() {
+                Ok(()) => eprintln!("Rollcopy is already running; showed its window."),
+                Err(e) => eprintln!("Rollcopy is already running (couldn't show it: {e})."),
+            }
+            return;
+        }
+        instance::Lock::Acquired(f) => Some(f),
+        instance::Lock::Unavailable => None,
+    };
     let worker = worker::spawn(paths.clone());
 
     gpui_kit::application().with_assets(Assets).run(move |cx| {

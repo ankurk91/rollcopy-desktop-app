@@ -254,6 +254,23 @@ pub fn load<T: DeserializeOwned + Default>(path: &Path) -> (T, Option<String>) {
     }
 }
 
+/// Creates `dir` (and missing parents) readable by this user only, and
+/// tightens it if it already exists. Rollcopy's cache and state hold
+/// thumbnails, photo copies and the phone's library database.
+pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    let mut b = std::fs::DirBuilder::new();
+    b.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        b.mode(0o700);
+        b.create(dir)?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    b.create(dir)
+}
+
 /// Saves as TOML via a temp file + rename, so a crash never leaves a
 /// half-written file.
 pub fn save<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
