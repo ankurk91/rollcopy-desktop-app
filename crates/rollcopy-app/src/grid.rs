@@ -250,21 +250,35 @@ impl MainView {
             summary.push_str(&format!(" · from DCIM folder ({reason})"));
         }
 
-        let chip = |id: &'static str, label: &str, f: Filter, n: usize, cx: &mut Context<Self>| {
-            let active = self.filter == f;
-            btn(id)
-                .small()
-                .label(format!("{label} {n}"))
-                .when(active, |b| b.primary())
-                .when(!active, |b| b.ghost())
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.filter = f;
-                    this.recompute_visible();
-                    // Keep arrow keys on the grid, not on the chip.
-                    window.focus(&this.focus, cx);
-                    cx.notify();
-                }))
-        };
+        // Type filters: an icon and a count, named in the tooltip. Empty
+        // ones are left out (unless selected) to keep the row short.
+        let chips: Vec<AnyElement> = Filter::ALL
+            .iter()
+            .filter(|&&f| f == Filter::All || f == self.filter || count(f) > 0)
+            .map(|&f| {
+                let active = self.filter == f;
+                let n = count(f);
+                btn(("filter", f.count_index()))
+                    .small()
+                    .icon(filter_icon(f))
+                    .label(if f == Filter::All {
+                        format!("All {n}")
+                    } else {
+                        n.to_string()
+                    })
+                    .tooltip(format!("{} ({n})", f.label()))
+                    .when(active, |b| b.primary())
+                    .when(!active, |b| b.ghost())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.filter = f;
+                        this.recompute_visible();
+                        // Keep arrow keys on the grid, not on the chip.
+                        window.focus(&this.focus, cx);
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            })
+            .collect();
 
         v_flex()
             .px(px(PAD))
@@ -325,28 +339,7 @@ impl MainView {
                 h_flex()
                     .flex_wrap()
                     .gap_1()
-                    .child(chip("f-all", "All", Filter::All, count(Filter::All), cx))
-                    .child(chip(
-                        "f-photos",
-                        "Photos",
-                        Filter::Photos,
-                        count(Filter::Photos),
-                        cx,
-                    ))
-                    .child(chip(
-                        "f-videos",
-                        "Videos",
-                        Filter::Videos,
-                        count(Filter::Videos),
-                        cx,
-                    ))
-                    .child(chip(
-                        "f-edited",
-                        "Edited",
-                        Filter::Edited,
-                        count(Filter::Edited),
-                        cx,
-                    ))
+                    .children(chips)
                     .child(div().w(px(12.)))
                     .when(self.dest_root().is_some(), |d| {
                         d.child(sync_chip(
@@ -900,6 +893,20 @@ impl MainView {
     }
 }
 
+/// Icon for a type filter chip.
+fn filter_icon(f: Filter) -> IconName {
+    match f {
+        Filter::All => IconName::LayoutGrid,
+        Filter::Photos => IconName::Image,
+        Filter::Videos => IconName::Video,
+        Filter::Edited => IconName::SquarePen,
+        Filter::Favorites => IconName::Heart,
+        Filter::Live => IconName::CircleDot,
+        Filter::Screenshots => IconName::Scan,
+        Filter::Selfies => IconName::UserRound,
+    }
+}
+
 /// Copied / Not copied chip; clicking the active one turns the filter off.
 fn sync_chip(
     id: &'static str,
@@ -962,6 +969,10 @@ impl MainView {
                 (Filter::Photos, _) => "No photos here.",
                 (Filter::Videos, _) => "No videos here.",
                 (Filter::Edited, _) => "No edited items here.",
+                (Filter::Favorites, _) => "No favourites here.",
+                (Filter::Live, _) => "No Live Photos here.",
+                (Filter::Screenshots, _) => "No screenshots here.",
+                (Filter::Selfies, _) => "No selfies here.",
                 (Filter::All, SyncFilter::All) => "Nothing here.",
             };
             (

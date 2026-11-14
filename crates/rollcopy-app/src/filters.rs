@@ -14,11 +14,23 @@ pub(crate) enum Filter {
     Photos,
     Videos,
     Edited,
+    Favorites,
+    Live,
+    Screenshots,
+    Selfies,
 }
 
 impl Filter {
-    pub(crate) const ALL: [Filter; 4] =
-        [Filter::All, Filter::Photos, Filter::Videos, Filter::Edited];
+    pub(crate) const ALL: [Filter; 8] = [
+        Filter::All,
+        Filter::Photos,
+        Filter::Videos,
+        Filter::Edited,
+        Filter::Favorites,
+        Filter::Live,
+        Filter::Screenshots,
+        Filter::Selfies,
+    ];
 
     pub(crate) fn count_index(self) -> usize {
         self as usize
@@ -30,6 +42,24 @@ impl Filter {
             Filter::Photos => a.kind == MediaKind::Photo,
             Filter::Videos => a.kind == MediaKind::Video,
             Filter::Edited => a.is_edited(),
+            Filter::Favorites => a.favorite,
+            Filter::Live => a.live_photo,
+            Filter::Screenshots => a.screenshot,
+            Filter::Selfies => a.is_selfie(),
+        }
+    }
+
+    /// Name shown in the chip's tooltip and the empty state.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Filter::All => "All",
+            Filter::Photos => "Photos",
+            Filter::Videos => "Videos",
+            Filter::Edited => "Edited",
+            Filter::Favorites => "Favourites",
+            Filter::Live => "Live Photos",
+            Filter::Screenshots => "Screenshots",
+            Filter::Selfies => "Selfies",
         }
     }
 }
@@ -63,11 +93,11 @@ impl MainView {
         let (sel, filter) = (self.selection, self.filter);
         let show_hidden = self.config.library.show_hidden;
         let LibState::Loaded { library, tree } = &self.library else {
-            self.filter_counts = [0; 4];
+            self.filter_counts = [0; Filter::ALL.len()];
             self.sync_counts = [0; 3];
             return;
         };
-        let mut counts = [0; 4];
+        let mut counts = [0; Filter::ALL.len()];
         let mut sync = [0; 3];
         let query = Query::new(&self.query);
         for a in library

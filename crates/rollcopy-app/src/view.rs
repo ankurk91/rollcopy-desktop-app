@@ -165,7 +165,7 @@ pub struct MainView {
     pub(crate) image_dims: HashMap<PathBuf, Option<(u32, u32)>>,
     /// Items per filter chip for the current tree selection, cached so the
     /// header doesn't walk the whole library every frame.
-    pub(crate) filter_counts: [usize; 4],
+    pub(crate) filter_counts: [usize; crate::filters::Filter::ALL.len()],
     pub(crate) sync_filter: SyncFilter,
     /// All / copied / not copied, for the current tree selection and filter.
     pub(crate) sync_counts: [usize; 3],
@@ -345,7 +345,7 @@ impl MainView {
             copied_for: None,
             copied_gen: 0,
             image_dims: HashMap::new(),
-            filter_counts: [0; 4],
+            filter_counts: [0; crate::filters::Filter::ALL.len()],
             sync_filter: SyncFilter::All,
             sync_counts: [0; 3],
             counts_dirty: false,

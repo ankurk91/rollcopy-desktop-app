@@ -16,6 +16,9 @@ use crate::asset::{Asset, MediaKind, kind_from_extension};
 const APPLE_EPOCH_OFFSET: f64 = 978_307_200.0;
 /// `ZKINDSUBTYPE` value for Live Photos (verified on iOS 27).
 const SUBTYPE_LIVE_PHOTO: i64 = 2;
+/// `ZKINDSUBTYPE` values for screenshots (photos) and screen recordings.
+const SUBTYPE_SCREENSHOT: i64 = 10;
+const SUBTYPE_SCREEN_RECORDING: i64 = 102;
 /// Photos stores "no location" as -180/-180 rather than NULL.
 const NO_COORD: f64 = -180.0;
 
@@ -294,6 +297,7 @@ fn row_to_asset(r: &Row<'_>) -> rusqlite::Result<Option<(i64, Asset)>> {
 
     let subtype: Option<i64> = r.get(3)?;
     a.live_photo = kind == MediaKind::Photo && subtype == Some(SUBTYPE_LIVE_PHOTO);
+    a.screenshot = matches!(subtype, Some(SUBTYPE_SCREENSHOT | SUBTYPE_SCREEN_RECORDING));
     a.captured = r.get::<_, Option<f64>>(4)?.and_then(apple_time);
     a.tz_offset_secs = r
         .get::<_, Option<i64>>(5)?
@@ -321,6 +325,8 @@ fn row_to_asset(r: &Row<'_>) -> rusqlite::Result<Option<(i64, Asset)>> {
                 .to_owned()
         })
         .filter(|s| !s.is_empty());
+    // iOS also records screenshots as saved by "Screenshots".
+    a.screenshot |= a.source_app.as_deref() == Some("Screenshots");
     a.place = r
         .get::<_, Option<Vec<u8>>>(17)?
         .and_then(|b| place_from_archive(&b));

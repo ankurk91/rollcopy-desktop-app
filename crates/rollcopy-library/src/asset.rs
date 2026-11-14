@@ -29,6 +29,8 @@ pub struct Asset {
     /// In Recently Deleted. Shown greyed out, never copied (PLAN §6).
     pub trashed: bool,
     pub live_photo: bool,
+    /// A screenshot (or screen recording) taken on the phone.
+    pub screenshot: bool,
     /// (latitude, longitude), if recorded.
     pub location: Option<(f64, f64)>,
     pub original_size: Option<u64>,
@@ -67,6 +69,7 @@ impl Asset {
             hidden: false,
             trashed: false,
             live_photo: false,
+            screenshot: false,
             location: None,
             original_size: None,
             edited_render: None,
@@ -101,6 +104,13 @@ impl Asset {
         self.filename
             .rsplit_once('.')
             .map_or(self.filename.as_str(), |(s, _)| s)
+    }
+
+    /// Taken with the front camera (from the lens name, Photos DB only).
+    pub fn is_selfie(&self) -> bool {
+        self.lens
+            .as_deref()
+            .is_some_and(|l| l.to_ascii_lowercase().contains("front"))
     }
 
     pub fn is_edited(&self) -> bool {
@@ -232,6 +242,16 @@ mod tests {
         let a = Asset::new("DCIM/100APPLE", "IMG_0057.HEIC", MediaKind::Photo);
         assert_eq!(a.stem(), "IMG_0057");
         assert_eq!(a.device_path(), "/DCIM/100APPLE/IMG_0057.HEIC");
+    }
+
+    #[test]
+    fn selfies_come_from_the_front_lens() {
+        let mut a = Asset::new("DCIM/100APPLE", "IMG_0001.HEIC", MediaKind::Photo);
+        assert!(!a.is_selfie());
+        a.lens = Some("iPhone front camera 2.69mm f/1.9".into());
+        assert!(a.is_selfie());
+        a.lens = Some("iPhone back dual wide camera 6.86mm f/1.78".into());
+        assert!(!a.is_selfie());
     }
 
     #[test]
