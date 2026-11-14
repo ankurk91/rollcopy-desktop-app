@@ -222,6 +222,8 @@ pub struct UiState {
     pub transfers_height: f32,
     /// Unix seconds of the last update check (for the once-a-day limit).
     pub last_update_check: Option<i64>,
+    /// The first-run guide was seen.
+    pub welcomed: bool,
 }
 
 impl Default for UiState {
@@ -236,6 +238,7 @@ impl Default for UiState {
             transfer_columns: Vec::new(),
             transfers_height: crate::transfers::PANEL_H,
             last_update_check: None,
+            welcomed: false,
         }
     }
 }

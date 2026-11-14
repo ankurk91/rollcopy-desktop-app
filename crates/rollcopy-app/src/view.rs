@@ -62,6 +62,7 @@ actions!(
         CloseWindow,
         ShowAbout,
         ShowShortcuts,
+        ShowWelcome,
         Quit,
     ]
 );
@@ -227,6 +228,8 @@ pub struct MainView {
     pub(crate) quit_prompt: bool,
     pub(crate) about_open: bool,
     pub(crate) shortcuts_open: bool,
+    /// First-run guide (`welcome.rs`).
+    pub(crate) welcome_open: bool,
     pub(crate) credits_open: bool,
     pub(crate) about_note: Option<String>,
     pub(crate) update_ui: Option<crate::about::UpdateUi>,
@@ -404,6 +407,7 @@ impl MainView {
             quit_prompt: false,
             about_open: false,
             shortcuts_open: false,
+            welcome_open: !saved_ui.welcomed,
             credits_open: false,
             about_note: None,
             update_ui: None,
@@ -683,6 +687,10 @@ impl Render for MainView {
                     this.shortcuts_open = true;
                     cx.notify();
                 }))
+                .on_action(cx.listener(|this, _: &ShowWelcome, _, cx| {
+                    this.welcome_open = true;
+                    cx.notify();
+                }))
                 .on_action(cx.listener(|this, _: &ShowAbout, _, cx| {
                     this.about_open = true;
                     this.about_note = None;
@@ -723,6 +731,7 @@ impl Render for MainView {
                 .children(viewer)
                 .children(self.render_about(cx))
                 .children(self.render_shortcuts(cx))
+                .children(self.render_welcome(cx))
                 .children(self.render_update_dialog(cx))
                 .children(self.render_quit_prompt(cx)),
         )

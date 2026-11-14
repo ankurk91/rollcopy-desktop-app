@@ -12,7 +12,7 @@ use crate::prefs::Prefs;
 use crate::update::{self, UpdateCheck};
 use crate::view::{
     CheckForUpdates, MainView, OpenPreferences, Quit, ReportIssue, ShowAbout, ShowShortcuts,
-    ViewOnGitHub, btn, muted,
+    ShowWelcome, ViewOnGitHub, btn, muted,
 };
 
 /// Path the app icon is served under (see `main.rs` asset source).
@@ -86,6 +86,7 @@ impl MainView {
                     .menu("View on GitHub", Box::new(ViewOnGitHub))
                     .menu("Report an Issue", Box::new(ReportIssue))
                     .separator()
+                    .menu("Getting Started", Box::new(ShowWelcome))
                     .menu("Keyboard Shortcuts", Box::new(ShowShortcuts))
                     .menu("About Rollcopy", Box::new(ShowAbout))
                     .menu("Quit", Box::new(Quit))
@@ -478,7 +479,7 @@ impl MainView {
     }
 }
 
-fn overlay(id: &'static str, card: AnyElement) -> AnyElement {
+pub(crate) fn overlay(id: &'static str, card: AnyElement) -> AnyElement {
     div()
         .id(id)
         .absolute()

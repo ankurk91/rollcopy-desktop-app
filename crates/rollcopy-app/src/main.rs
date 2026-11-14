@@ -30,6 +30,7 @@ mod tree;
 mod update;
 mod view;
 mod viewer;
+mod welcome;
 mod widgets;
 mod worker;
 
