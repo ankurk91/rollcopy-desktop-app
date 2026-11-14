@@ -291,10 +291,17 @@ impl MainView {
             if failed > 0 {
                 body.push_str(&format!(" · {failed} failed"));
             }
-            if let Some(dest) = self.dest_root() {
+            let dest = self.dest_root();
+            if let Some(dest) = &dest {
                 body.push_str(&format!("\n{}", dest.display()));
             }
-            crate::notify::send("Transfers finished", body);
+            // Click: the folder with the copies, or the window if something
+            // failed (the panel says what).
+            let click = match dest {
+                Some(dest) if failed == 0 && copied > 0 => crate::notify::OnClick::OpenFolder(dest),
+                _ => crate::notify::OnClick::ShowWindow,
+            };
+            crate::notify::send_with("Transfers finished", body, click);
         }
         // Closed during the copy: Rollcopy stays in the tray (decided
         // 2026-11-12). Quitting here used to cut off the notification.

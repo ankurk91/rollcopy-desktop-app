@@ -16,6 +16,14 @@ pub fn show_in_folder(file: &Path) {
     });
 }
 
+/// Opens a folder in the file manager. Doesn't block.
+pub fn open_folder(dir: &Path) {
+    let dir = dir.to_path_buf();
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("xdg-open").arg(dir).status();
+    });
+}
+
 fn show_items(file: &Path) -> bool {
     let uri = file_uri(file);
     std::process::Command::new("dbus-send")

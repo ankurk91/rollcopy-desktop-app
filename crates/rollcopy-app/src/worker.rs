@@ -214,7 +214,7 @@ pub fn spawn(paths: CachePaths) -> Worker {
                 .build()
                 .expect("tokio runtime");
             rt.block_on(async move {
-                crate::notify::start();
+                crate::notify::start(ev_tx.clone());
                 if cfg!(debug_assertions) && std::env::var_os("ROLLCOPY_DEBUG_NOTIFY").is_some() {
                     crate::notify::send(
                         "Rollcopy notification test",

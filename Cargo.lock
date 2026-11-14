@@ -5619,6 +5619,7 @@ dependencies = [
  "async-channel",
  "chrono",
  "directories",
+ "futures-lite",
  "gpui-kit",
  "gpui-kit-assets",
  "ksni",

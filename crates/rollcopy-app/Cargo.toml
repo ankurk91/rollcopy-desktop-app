@@ -34,6 +34,7 @@ ureq = "3.5.2"
 ksni = { version = "0.3", default-features = false, features = ["tokio"] }
 resvg = "0.50.0"
 zbus = { version = "6.2", default-features = false, features = ["tokio", "service"] }
+futures-lite = "2"
 
 [dev-dependencies]
 tempfile = "3.27.0"
