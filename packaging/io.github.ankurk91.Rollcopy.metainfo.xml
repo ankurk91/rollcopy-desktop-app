@@ -49,6 +49,17 @@
   </keywords>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5.0" date="2026-11-14">
+      <description>
+        <ul>
+          <li>Search (Ctrl+F), zoomable thumbnails and month headings in the grid</li>
+          <li>Copy new: one click for everything not copied yet; overall progress with time left</li>
+          <li>Filters for favourites, Live Photos, screenshots and selfies</li>
+          <li>Viewer zoom and pan, details panel and Show in folder</li>
+          <li>Clickable notifications, a first-run guide, optional Live Photo motion as video</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-11-13">
       <description>
         <ul>
