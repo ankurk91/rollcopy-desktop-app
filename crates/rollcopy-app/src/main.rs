@@ -19,6 +19,7 @@ mod prefs;
 mod prefs_window;
 mod preview;
 mod report;
+mod sections;
 mod sidebar;
 mod theme;
 mod toolbar;

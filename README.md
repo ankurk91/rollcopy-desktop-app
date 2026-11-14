@@ -18,7 +18,8 @@ on the way.
 
 ## Features
 
-- **Browse the Photos library**: by year and month, or by **album**; zoomable thumbnails; filters (photos, videos,
+- **Browse the Photos library**: by year and month, or by **album**, with month headings in the
+  grid; zoomable thumbnails; filters (photos, videos,
   edited, copied / not copied), sort by date taken, keyboard navigation, and a full-window viewer
   (Space), and **search** by name, place, album, app or camera (Ctrl+F). A **list view** with resizable columns shows names, dates and sizes without any
   thumbnails: quicker, and nothing on screen for people looking over your shoulder. Photos taken

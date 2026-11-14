@@ -111,7 +111,13 @@ it like this" details. Keep both up to date. No personal data here (see [AGENTS.
 - The NumberInput triggered an a11y `set_focus called more than once` panic in debug; dependencies are
   built with `debug-assertions = false` and a dropdown replaced the number box.
 - `use gpui_kit::*` imports gpui's `test` macro: in test modules import names explicitly, never `super::*`.
-- `uniform_list` needs equal row heights; variable rows (section headers) need `list`.
+- `uniform_list` needs equal row heights; variable rows (section headers) need `list`. The grid uses
+  `list` over `sections::Row`s (month headings + tile rows); `ListState::reset` scrolls to the top, so
+  after a layout-only change (zoom, resize) the focused item is scrolled back into view.
+- Element `on_scroll` runs in the bubble phase, after a scrollable child has used the wheel; Ctrl+scroll
+  zoom registers a capture-phase `window.on_mouse_event` from a `canvas`.
+- Window-wide key bindings fire while typing in a text box unless scoped: grid keys use the context
+  `Rollcopy && !Input`.
 - `img()` sizes itself from the image's aspect ratio and grew past its box: the viewer computes the
   image box itself. gpui also ignores EXIF orientation: viewer images are made upright first.
 - `cargo fmt` reflows code; scripted edits must match the formatted text.

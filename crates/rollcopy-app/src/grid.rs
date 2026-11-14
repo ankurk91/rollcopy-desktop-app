@@ -44,6 +44,8 @@ pub(crate) fn zoomed(current: f32, steps: i32) -> f32 {
         .clamp(TILE_MIN, TILE_MAX)
 }
 const GAP: f32 = 8.;
+/// Height of a month heading row.
+const HEADER_H: f32 = 40.;
 pub(crate) const PAD: f32 = 16.;
 /// Room for the scrollbar so the last column never sits under it.
 const SCROLLBAR: f32 = 14.;
@@ -143,15 +145,16 @@ impl MainView {
         self.list_row_w = self.content_width(window);
         self.cols = cols;
         self.tile = tile;
+        if !self.list_view {
+            self.rebuild_rows(cols);
+        }
         if std::mem::take(&mut self.scroll_focused_into_view_later)
             && let Some(pos) = self
                 .focused
                 .and_then(|i| self.visible.iter().position(|&v| v == i))
         {
-            self.grid_scroll
-                .scroll_to_item(pos / cols.max(1), ScrollStrategy::Center);
+            self.reveal(pos, true);
         }
-        let rows = self.visible.len().div_ceil(cols);
 
         let header = self.render_grid_header(cx).into_any_element();
         let body = if self.visible.is_empty() {
@@ -192,22 +195,15 @@ impl MainView {
                 .min_h_0()
                 .child(Self::zoom_wheel_listener(cx))
                 .child(
-                    uniform_list(
-                        "grid",
-                        rows,
-                        cx.processor(move |this, range: Range<usize>, _window, cx| {
-                            this.request_thumbs(range.clone(), cols);
-                            range
-                                .map(|row| this.render_row(row, cols, cx))
-                                .collect::<Vec<_>>()
-                        }),
+                    list(
+                        self.grid_list.clone(),
+                        cx.processor(|this, ix: usize, _window, cx| this.render_grid_row(ix, cx)),
                     )
-                    .track_scroll(&self.grid_scroll)
                     .size_full()
                     .px(px(PAD))
                     .pb(px(PAD)),
                 )
-                .vertical_scrollbar(&self.grid_scroll)
+                .vertical_scrollbar(&self.grid_list)
                 .into_any_element()
         };
 
@@ -472,14 +468,6 @@ impl MainView {
             })
     }
 
-    /// Queues thumbnails for the grid rows on screen.
-    fn request_thumbs(&mut self, rows: Range<usize>, cols: usize) {
-        let start = rows.start * cols;
-        let end = (rows.end * cols).min(self.visible.len());
-        let wanted: Vec<usize> = self.visible[start..end].to_vec();
-        self.request_thumbs_for(&wanted);
-    }
-
     /// Queues thumbnails for these asset indices that aren't known yet.
     /// Files already in the local cache are used directly without asking
     /// the phone.
@@ -524,14 +512,131 @@ impl MainView {
         }
     }
 
-    fn render_row(&self, row: usize, cols: usize, cx: &mut Context<Self>) -> AnyElement {
-        let start = row * cols;
-        let end = (start + cols).min(self.visible.len());
+    /// Rebuilds the grid's rows when the items, the columns or the grouping
+    /// changed. Grouped by month unless a single month is selected.
+    fn rebuild_rows(&mut self, cols: usize) {
+        let grouped = !matches!(self.selection, Selection::Month(..));
+        let key = (self.visible_gen, cols, grouped);
+        let Some(old) = self.rows_key.replace(key) else {
+            self.build_rows(cols, grouped);
+            return;
+        };
+        if old == key {
+            return;
+        }
+        self.build_rows(cols, grouped);
+        // Same items in a new layout (zoom, window size): stay on the
+        // focused item instead of jumping to the top.
+        if old.0 == key.0 {
+            self.scroll_focused_into_view_later = true;
+        }
+    }
+
+    fn build_rows(&mut self, cols: usize, grouped: bool) {
+        let assets = self.assets();
+        let months: Vec<_> = self
+            .visible
+            .iter()
+            .map(|&i| assets[i].year_month())
+            .collect();
+        self.grid_rows = crate::sections::build(&months, cols, grouped);
+        self.grid_list
+            .reset_with_uniform_height(self.grid_rows.len(), px(self.tile + GAP));
+    }
+
+    /// Scrolls so visible position `pos` is on screen; `top` puts its row
+    /// (and its month heading) at the top.
+    pub(crate) fn reveal(&mut self, pos: usize, top: bool) {
+        if self.list_view {
+            self.grid_scroll.scroll_to_item(
+                pos,
+                if top {
+                    ScrollStrategy::Center
+                } else {
+                    ScrollStrategy::Nearest
+                },
+            );
+            return;
+        }
+        let Some(row) = crate::sections::row_of(&self.grid_rows, pos) else {
+            return;
+        };
+        let header_above =
+            row > 0 && matches!(self.grid_rows[row - 1], crate::sections::Row::Header { .. });
+        if top {
+            let ix = if header_above { row - 1 } else { row };
+            self.grid_list.scroll_to(ListOffset {
+                item_ix: ix,
+                offset_in_item: px(0.),
+            });
+        } else {
+            if header_above {
+                self.grid_list.scroll_to_reveal_item(row - 1);
+            }
+            self.grid_list.scroll_to_reveal_item(row);
+        }
+    }
+
+    /// One grid row: a month heading or a row of tiles.
+    fn render_grid_row(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        match self.grid_rows.get(ix).cloned() {
+            Some(crate::sections::Row::Tiles { start, end }) => {
+                let indices: Vec<usize> = self.visible[start..end].to_vec();
+                self.request_thumbs_for(&indices);
+                h_flex()
+                    .h(px(self.tile + GAP))
+                    .gap(px(GAP))
+                    .items_start()
+                    .children((start..end).map(|pos| self.render_tile(pos, cx)))
+                    .into_any_element()
+            }
+            Some(crate::sections::Row::Header { month, start, end }) => {
+                self.render_month_header(ix, month, start, end, cx)
+            }
+            None => div().into_any_element(),
+        }
+    }
+
+    fn render_month_header(
+        &self,
+        ix: usize,
+        month: Option<(i32, u32)>,
+        start: usize,
+        end: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme().clone();
+        let title = match month {
+            Some((y, m)) => format!("{} {y}", month_name(m)),
+            None => "Undated".to_owned(),
+        };
+        let n = end - start;
         h_flex()
-            .h(px(self.tile + GAP))
-            .gap(px(GAP))
-            .items_start()
-            .children((start..end).map(|pos| self.render_tile(pos, cx)))
+            .h(px(HEADER_H))
+            .pt_2()
+            .gap_2()
+            .items_center()
+            .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
+            .child(muted(
+                format!("{n} item{}", if n == 1 { "" } else { "s" }),
+                &theme,
+            ))
+            .child(
+                btn(("select-month", ix))
+                    .xsmall()
+                    .ghost()
+                    .label("Select")
+                    .tooltip("Add this month to the selection")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        let keys: Vec<String> = this.visible[start..end]
+                            .iter()
+                            .map(|&i| this.assets()[i].device_path())
+                            .collect();
+                        this.selected.extend(keys);
+                        window.focus(&this.focus, cx);
+                        cx.notify();
+                    })),
+            )
             .into_any_element()
     }
 
@@ -691,14 +796,9 @@ impl MainView {
         }
         self.list_view = list;
         crate::prefs::Prefs::update_ui(cx, |ui| ui.list_view = list);
-        if let Some(pos) = self
-            .focused
-            .and_then(|i| self.visible.iter().position(|&v| v == i))
-        {
-            let cols = if list { 1 } else { self.cols.max(1) };
-            self.grid_scroll
-                .scroll_to_item(pos / cols, ScrollStrategy::Center);
-        }
+        // The grid's rows are rebuilt on the next layout; land on the
+        // focused item there.
+        self.scroll_focused_into_view_later = true;
         cx.notify();
     }
 
@@ -774,8 +874,7 @@ impl MainView {
             self.selected.insert(self.assets()[idx].device_path());
             self.anchor = Some(pos);
         }
-        self.grid_scroll
-            .scroll_to_item(pos / self.cols.max(1), ScrollStrategy::Nearest);
+        self.reveal(pos, false);
     }
 
     /// Copies the focused item (edited version if any) to a temp folder and

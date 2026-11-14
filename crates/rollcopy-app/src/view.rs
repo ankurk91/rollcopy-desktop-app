@@ -184,6 +184,13 @@ pub struct MainView {
     pub(crate) search: Entity<gpui_kit::component::input::InputState>,
     pub(crate) query: String,
     pub(crate) grid_scroll: UniformListScrollHandle,
+    /// The grid's rows (month headings and tiles) and their scroll state.
+    pub(crate) grid_rows: Vec<crate::sections::Row>,
+    pub(crate) grid_list: ListState,
+    /// What `grid_rows` was built for: (visible generation, columns, grouped).
+    pub(crate) rows_key: Option<(u64, usize, bool)>,
+    /// Bumped whenever `visible` is rebuilt.
+    pub(crate) visible_gen: u64,
     /// Tiles per row at the last render; arrow keys move by this much.
     pub(crate) cols: usize,
     /// Tile size at the last render (tiles stretch to fill each row).
@@ -353,6 +360,10 @@ impl MainView {
             zoom_pixels: 0.,
             scroll_focused_into_view_later: false,
             grid_scroll: UniformListScrollHandle::new(),
+            grid_rows: Vec::new(),
+            grid_list: ListState::new(0, ListAlignment::Top, px(400.)),
+            rows_key: None,
+            visible_gen: 0,
             cols: 1,
             tile: crate::grid::TILE_DEFAULT,
             preview_w: saved_ui.preview_width.max(PREVIEW_MIN_W),
@@ -465,8 +476,21 @@ impl MainView {
         cx.notify();
     }
 
-    pub(crate) fn row_delta(&self) -> isize {
-        self.cols.max(1) as isize
+    /// How far ↑ (`dir < 0`) or ↓ moves the focused item: one row in the
+    /// list; in the grid, to the same column of the next tile row, across
+    /// month headings. 0 at the top or bottom.
+    pub(crate) fn row_delta(&self, dir: i32) -> isize {
+        if self.list_view {
+            return dir as isize;
+        }
+        let Some(pos) = self
+            .focused
+            .and_then(|i| self.visible.iter().position(|&v| v == i))
+        else {
+            return dir as isize * self.cols.max(1) as isize;
+        };
+        crate::sections::vertical(&self.grid_rows, pos, dir)
+            .map_or(0, |t| t as isize - pos as isize)
     }
 
     pub(crate) fn resize_preview(
@@ -557,14 +581,14 @@ impl Render for MainView {
                     if this.viewer_open {
                         return;
                     }
-                    let d = this.row_delta();
-                    this.key_move(-d, false, cx)
+                    let d = this.row_delta(-1);
+                    this.key_move(d, false, cx)
                 }))
                 .on_action(cx.listener(|this, _: &MoveDown, _, cx| {
                     if this.viewer_open {
                         return;
                     }
-                    let d = this.row_delta();
+                    let d = this.row_delta(1);
                     this.key_move(d, false, cx)
                 }))
                 .on_action(cx.listener(|this, _: &ExtendLeft, _, cx| this.key_move(-1, true, cx)))
@@ -573,14 +597,14 @@ impl Render for MainView {
                     if this.viewer_open {
                         return;
                     }
-                    let d = this.row_delta();
-                    this.key_move(-d, true, cx)
+                    let d = this.row_delta(-1);
+                    this.key_move(d, true, cx)
                 }))
                 .on_action(cx.listener(|this, _: &ExtendDown, _, cx| {
                     if this.viewer_open {
                         return;
                     }
-                    let d = this.row_delta();
+                    let d = this.row_delta(1);
                     this.key_move(d, true, cx)
                 }))
                 .on_action(cx.listener(|this, _: &OpenItem, _, cx| {

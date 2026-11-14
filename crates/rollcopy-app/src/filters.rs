@@ -120,6 +120,7 @@ impl MainView {
         self.selected.clear();
         self.anchor = None;
         self.focused = self.visible.first().copied();
+        self.visible_gen += 1;
         self.grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
     }
 
