@@ -2,7 +2,9 @@
 
 [![CI](https://github.com/ankurk91/rollcopy-desktop-app/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ankurk91/rollcopy-desktop-app/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/ankurk91/rollcopy-desktop-app)](https://github.com/ankurk91/rollcopy-desktop-app/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ankurk91/rollcopy-desktop-app/total?cacheSeconds=3600)](https://somsubhra.github.io/github-release-stats/?username=ankurk91&repository=rollcopy-desktop-app&page=1&per_page=30)
 [![Licence: MIT](https://img.shields.io/github/license/ankurk91/rollcopy-desktop-app)](LICENSE)
+[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org)
 
 A **Linux desktop app** that copies photos and videos from an iPhone over a USB cable, as files any
 Android phone, PC or TV can open. No iTunes, no cloud, no account.
@@ -11,7 +13,7 @@ Plug in the phone, tap **Trust**, pick what you want, and Rollcopy copies it to
 `~/Pictures/Rollcopy/<phone name>/YYYY/MM/images|videos/`, converting HEIC to JPG and MOV to MP4
 on the way.
 
-![Rollcopy on Linux Mint: an iPhone photo library by year and month with Hidden and Recently Deleted, a thumbnail grid with copied badges and filters, the preview pane with photo details, and the transfer queue](.github/screenshot.jpg)
+![Rollcopy on Linux Mint: an iPhone photo library by year and month with Hidden and Recently Deleted, a thumbnail grid with copied badges and filters, the preview pane with photo details, and the transfer queue](.github/screenshot.jpg?v=1)
 
 > **Status:** early (0.4.0). Linux only. Tested on Linux Mint 22 (Cinnamon, X11) with iOS 27, and on
 > Ubuntu 26.04 (GNOME, Wayland) in a virtual machine.
@@ -19,11 +21,15 @@ on the way.
 ## Features
 
 - **Browse the Photos library**: by year and month, or by **album**, with month headings in the
-  grid; zoomable thumbnails; filters (photos, videos,
-  edited, copied / not copied), sort by date taken, keyboard navigation, and a full-window viewer
-  (Space), and **search** by name, place, album, app or camera (Ctrl+F). A **list view** with resizable columns shows names, dates and sizes without any
-  thumbnails: quicker, and nothing on screen for people looking over your shoulder. Photos taken
-  while the phone is plugged in appear with **Reload** (F5).
+  grid; zoomable thumbnails; sort by date taken; keyboard navigation.
+- **Filters** for photos, videos, edited, favourites, Live Photos, screenshots and selfies, and
+  copied / not copied; **search** by name, place, album, app or camera (Ctrl+F).
+- **Viewer** (Space): full-window, zoom and pan (scroll, double-click for 100%, drag), details (I),
+  and *Show in folder* for items you've copied.
+- **List view** with resizable columns: names, dates and sizes without any thumbnails, quicker, and
+  nothing on screen for people looking over your shoulder.
+- **Copy new**: one click copies everything you haven't copied yet. Photos taken while the phone is
+  plugged in appear with **Reload** (F5).
 - **Private by default**: the Hidden album (locked by Face ID on the phone) and Recently Deleted
   aren't shown or copied unless you turn them on in Preferences, and then only under their own
   entries, never in "All media" or albums. Even then, Hidden items stay blurred (in the grid, the
@@ -41,13 +47,16 @@ on the way.
   capture time. iPhones reuse names like `IMG_0057` after 9,999 photos; a different photo with the
   same name is saved as `IMG_0057 (2).JPG`, never over another file. For an item copied before, you
   choose Ask / Skip / Overwrite.
-- **Transfer queue** with progress, time taken per item, pause/resume, cancel, retry and an
-  exportable error report; the panel and its columns can be resized. Unplugging or locking the phone
+- **Transfer queue** with overall progress and time left, time taken per item, pause/resume,
+  cancel, retry and an exportable error report; the panel and its columns can be resized. Unplugging or locking the phone
   pauses the queue instead of failing items, and it carries on when the phone is back. A full disk
   pauses it too.
 - **Tray icon and notifications**: closing the window during a copy keeps Rollcopy running in the tray;
-  starting Rollcopy again brings the window back.
-- **Preferences** for the destination, folder layout, JPEG quality, video format and theme.
+  starting Rollcopy again brings the window back. Click the "Transfers finished" notification to open
+  the folder with your copies.
+- **First-run guide**: three steps to your first copy (☰ → Getting Started shows it again).
+- **Preferences** for the destination, folder layout, JPEG quality, video format, Live Photo motion,
+  the Hidden album and theme.
 
 ### Your phone is safe
 
@@ -103,8 +112,9 @@ packaging/install-local.sh --uninstall
 
 1. Connect the iPhone with a cable and unlock it.
 2. Tap **Trust** on the phone and enter your passcode when asked.
-3. Pick items (click, Ctrl/Shift+click, Ctrl+A, arrow keys) and press **Copy selected**, or
-   **Copy all** for the year, month or album you're viewing. Switch between the grid and the list
+3. Press **Copy new** to copy everything you haven't copied yet. Or pick items (click,
+   Ctrl/Shift+click, Ctrl+A, arrow keys) and press **Copy selected**, or **Copy all** for the year,
+   month or album you're viewing. Switch between the grid and the list
    with the buttons next to *Newest first*.
 4. Change where files go with **Save to** (📁) or in **Preferences** (⚙ or Ctrl+,).
 5. Took new photos while plugged in? Press **↻** next to the phone's name (or F5).
@@ -126,6 +136,10 @@ packaging/install-local.sh --uninstall
 
 ## Troubleshooting
 
+- **"Open folder" / "Show in folder" does nothing or takes ages (Linux Mint):** a stuck Nemo
+  window process makes every new folder wait for it. Run `nemo -q`, then try again.
+- **Photos open in an error in the image viewer:** Rollcopy's *Open* turns HEIC into JPG first, so
+  any viewer can show it; copies you make are JPG already.
 - **"The connection keeps dropping" / phone not detected:** try another cable or USB port, without
   a hub. Many cheap cables only charge.
 - **"Unlock your iPhone and tap Trust" doesn't go away:** unplug, unlock the phone, plug in again and

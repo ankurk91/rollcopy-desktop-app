@@ -99,6 +99,17 @@ it like this" details. Keep both up to date. No personal data here (see [AGENTS.
 - **Opening files:** `xdg-open` exit code 4 means no app could open it. A fresh Ubuntu may have no video
   player at all, or one whose GStreamer lacks codecs (`gstreamer1.0-libav`); the app checks
   `xdg-mime query default` and the libav plugin and explains.
+- **Show in folder:** `org.freedesktop.FileManager1.ShowItems` selects the file in Nautilus and
+  Dolphin, but on Mint the service belongs to `nemo-desktop`, which starts `nemo <file>` and took ages
+  to show a window, so with Nemo the folder is opened instead (checked via the service owner's
+  `/proc/<pid>/comm`).
+- **A stuck Nemo blocks every "open folder":** the first `nemo` owns `org.Nemo`; later launches hand
+  their request to it and exit. If that one hangs (seen once, no window, main thread waiting), nothing
+  opens until `nemo -q`. Not Rollcopy's doing (a Nemo started from a shell hung the same way).
+- **Opening HEIC:** Mint's Xviewer (and other viewers) can't read HEIC; *Open* converts to JPG first.
+- **Clickable notifications:** send a `default` action and listen for `ActionInvoked` on the same
+  long-lived connection; keep a small id → action map. Simulated clicks:
+  `dbus-send --type=signal /org/freedesktop/Notifications org.freedesktop.Notifications.ActionInvoked uint32:<id> string:default`.
 - **Old copy shadowing a new install:** `packaging/install-local.sh` puts a binary in `~/.local/bin` and a
   menu entry in `~/.local/share/applications`, both ahead of the .deb's. Use `--uninstall`.
 
@@ -138,6 +149,14 @@ it like this" details. Keep both up to date. No personal data here (see [AGENTS.
 - AppImage: appimagetool only reads `*.appdata.xml`, so the metainfo is copied under that name.
 - Checking release status: `gh api repos/<owner>/<repo>/releases/tags/<tag>` (a drafts-blind login can
   miss drafts in the list).
+
+## Screenshots for the README
+
+- Never ship real names, dates or places. Rather than blurring, replace the text: measure the
+  text's ink box, find the Ubuntu Sans size whose rendering of the old text has the same width, paint
+  the box with the background colour and draw the new text at the same origin. Pick replacement
+  names of the same width (e.g. a neutral first name) so icons don't shift. Save as JPEG ~82 quality
+  and bump the `?v=N` on the README link so GitHub's image cache refreshes.
 
 ## Ideas checked and turned down
 

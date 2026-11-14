@@ -416,6 +416,18 @@ The device, library, convert and queue crates have no UI dependency, so they can
 - In-app fullscreen viewer with ← / →.
 - Refresh cached thumbnails for items edited on the phone after caching.
 
+**Done after 0.4.0** (2026-11-14, for 0.5.0)
+- Search (Ctrl+F) over name, place, albums, source app and camera; zoomable grid (80–300 px,
+  Ctrl+=/−/0, Ctrl+scroll); month headings in the grid with "Select" per month.
+- Copy new (everything not copied, never Hidden or Recently Deleted); overall progress with time left.
+- Icon filter chips: Favourites, Live Photos, Screenshots (`ZKINDSUBTYPE` 10/102 or "Screenshots"
+  as saving app), Selfies (lens name contains "front").
+- Viewer: zoom/pan, details panel (I), Show in folder. Open shows HEIC as JPG.
+- Clickable notifications ("Transfers finished" opens the folder); first-run guide.
+- Live Photos' motion as a video, behind a preference (off).
+- Checked and turned down: auto-copy on connect, music, importing into the phone, an in-app map
+  (a Google Maps link instead), the Windows port (shelved; see NOTES.md).
+
 **Still to test**
 - Wayland session (only X11 tested so far) and GNOME (its tray needs the AppIndicator extension).
 - **GNOME on Wayland has no server-side window decorations** (found on Ubuntu 26.04 in a VM, 2026-11-13): the window had no title bar or buttons. Rollcopy now draws its own when `window.window_decorations()` is `Client`. The toolbar sits inside gpui-component's `TitleBar` (drag to move, double-click to maximise, minimise/maximise/close), both windows get `window_border` for resize edges, and the × goes through the same close checks as the window manager's. Under server-side decorations nothing changes. `ROLLCOPY_CSD=1` (debug builds) requests client-side decorations to test this on X11. The window-button icons must be in the app's icon list, or the buttons draw nothing.

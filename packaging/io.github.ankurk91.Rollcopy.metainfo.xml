@@ -17,9 +17,9 @@
       by the date each item was taken.
     </p>
     <ul>
-      <li>Browse the library by year and month, with thumbnails and details</li>
-      <li>Edited photos are copied as edited; Live Photos as stills</li>
-      <li>Shows what is already copied, so you only copy what's new</li>
+      <li>Browse the library by year, month or album, with thumbnails, search and filters</li>
+      <li>Edited photos are copied as edited; Live Photos as stills, optionally with their motion</li>
+      <li>Shows what is already copied; one click copies everything new</li>
       <li>Read-only towards the phone: it never changes or deletes anything there</li>
       <li>Works offline; no account or cloud needed</li>
     </ul>
