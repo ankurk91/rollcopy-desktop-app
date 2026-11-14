@@ -54,6 +54,7 @@ gpui_kit_assets::icon_assets!(
         ChevronLeft,
         ChevronRight,
         Copy,
+        CopyPlus,
         Eye,
         EyeOff,
         LayoutGrid,

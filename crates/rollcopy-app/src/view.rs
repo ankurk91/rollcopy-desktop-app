@@ -183,6 +183,8 @@ pub struct MainView {
     /// Search box above the grid, and what's typed in it.
     pub(crate) search: Entity<gpui_kit::component::input::InputState>,
     pub(crate) query: String,
+    /// Items not copied yet (see `new_items`), counted with the chips.
+    pub(crate) new_count: usize,
     pub(crate) grid_scroll: UniformListScrollHandle,
     /// The grid's rows (month headings and tiles) and their scroll state.
     pub(crate) grid_rows: Vec<crate::sections::Row>,
@@ -350,6 +352,7 @@ impl MainView {
             newest_first: true,
             search,
             query: String::new(),
+            new_count: 0,
             tile_target: if saved_ui.tile_size > 0. {
                 saved_ui
                     .tile_size

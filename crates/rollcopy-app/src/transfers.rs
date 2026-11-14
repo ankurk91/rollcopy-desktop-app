@@ -201,6 +201,26 @@ impl MainView {
         self.copy_assets(assets);
     }
 
+    /// Everything on the phone not copied yet, whatever is shown: no
+    /// Hidden or Recently Deleted items. Only after the copied-state scan
+    /// has run, so nothing already copied is queued again.
+    pub(crate) fn new_items(&self) -> Vec<Asset> {
+        if self.copied_for.is_none() {
+            return Vec::new();
+        }
+        self.assets()
+            .iter()
+            .filter(|a| crate::filters::is_new(a, &self.in_dest))
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn copy_new(&mut self) {
+        let mut assets = self.new_items();
+        assets.sort_by_key(|a| a.captured);
+        self.copy_assets(assets);
+    }
+
     pub(crate) fn copy_focused(&mut self) {
         if let Some(a) = self.focused.and_then(|i| self.assets().get(i)).cloned() {
             self.copy_assets(vec![a]);
@@ -804,6 +824,7 @@ impl MainView {
         let dest = self.dest_root()?;
         let theme = cx.theme().clone();
         let n = self.copyable_selected();
+        let new = self.new_count;
         Some(
             // The path gives way first when the toolbar is short of room.
             h_flex()
@@ -835,6 +856,23 @@ impl MainView {
                             .icon(IconName::FolderOpen)
                             .tooltip("Choose the destination folder")
                             .on_click(cx.listener(|this, _, _, cx| this.pick_destination(cx))),
+                    ),
+                )
+                .child(
+                    div().flex_shrink_0().child(
+                        btn("copy-new")
+                            .small()
+                            .outline()
+                            .icon(IconName::CopyPlus)
+                            .label(format!("Copy new ({new})"))
+                            .tooltip(
+                                "Copy everything not copied yet (not Hidden or Recently Deleted)",
+                            )
+                            .disabled(new == 0)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.copy_new();
+                                cx.notify();
+                            })),
                     ),
                 )
                 .child(

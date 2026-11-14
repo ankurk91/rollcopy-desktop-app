@@ -89,6 +89,15 @@ impl MainView {
         }
         self.filter_counts = counts;
         self.sync_counts = sync;
+        self.new_count = if self.copied_for.is_some() {
+            library
+                .assets
+                .iter()
+                .filter(|a| is_new(a, &self.in_dest))
+                .count()
+        } else {
+            0
+        };
         self.counts_dirty = false;
     }
 
@@ -128,6 +137,15 @@ impl MainView {
     pub(crate) fn is_copied(&self, key: &str) -> bool {
         matches!(self.in_dest.get(key), Some(Some(_)))
     }
+}
+
+/// Not copied yet, and allowed in "Copy new": no Hidden or Recently Deleted
+/// items, and only once the copied-state scan has an answer for it.
+pub(crate) fn is_new(
+    a: &rollcopy_library::Asset,
+    in_dest: &std::collections::HashMap<String, Option<std::path::PathBuf>>,
+) -> bool {
+    !a.trashed && !a.hidden && matches!(in_dest.get(&a.device_path()), Some(None))
 }
 
 /// The search box: every word must appear (case-insensitive) in the file
