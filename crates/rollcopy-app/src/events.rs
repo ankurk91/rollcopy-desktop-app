@@ -263,7 +263,12 @@ impl MainView {
             self.notified_pause = self.transfers.paused.clone();
         }
         let active = self.unfinished_transfers() > 0;
+        if active && !self.was_active {
+            let done = crate::transfers::overall(&self.transfers.rows, None).map_or(0, |o| o.done);
+            self.transfers.batch_start = Some((std::time::Instant::now(), done));
+        }
         if self.was_active && !active {
+            self.transfers.batch_start = None;
             self.on_batch_finished(window);
         }
         self.was_active = active;
@@ -347,7 +352,13 @@ impl MainView {
                 .unwrap_or_default();
             let line = match &self.transfers.paused {
                 Some(reason) => format!("Paused: {reason}"),
-                None => format!("Copying {done} of {}{current}", rows.len()),
+                None => {
+                    let left = crate::transfers::overall(rows, self.transfers.batch_start)
+                        .and_then(|o| o.left)
+                        .map(|l| format!(" · about {} left", crate::transfers::left_label(l)))
+                        .unwrap_or_default();
+                    format!("Copying {done} of {}{current}{left}", rows.len())
+                }
             };
             (TrayStatus::Copying, line)
         } else if failed > 0 {

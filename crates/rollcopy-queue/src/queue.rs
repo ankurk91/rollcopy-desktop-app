@@ -138,6 +138,8 @@ pub enum QueueEvent {
         name: String,
         source: String,
         dest: PathBuf,
+        /// Size of the original on the phone, if the library knows it.
+        size: Option<u64>,
     },
     State {
         id: JobId,
@@ -545,6 +547,7 @@ impl<O: Opener> Manager<O> {
                 name,
                 source: asset.device_path(),
                 dest: dest.clone(),
+                size: asset.original_size,
             });
             self.jobs.insert(
                 id,

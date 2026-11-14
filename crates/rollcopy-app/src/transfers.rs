@@ -52,6 +52,81 @@ pub(crate) struct TransferRow {
     pub started: Option<std::time::Instant>,
     /// How long it took, from starting to read until it finished.
     pub took: Option<std::time::Duration>,
+    /// Size of the original, for overall progress.
+    pub size: Option<u64>,
+}
+
+/// Progress of the copies in the panel, by bytes read from the phone.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Overall {
+    pub done: u64,
+    pub total: u64,
+    /// Estimated time left, once there's enough to go on.
+    pub left: Option<std::time::Duration>,
+}
+
+impl Overall {
+    pub(crate) fn fraction(&self) -> f32 {
+        if self.total == 0 {
+            0.
+        } else {
+            (self.done as f64 / self.total as f64).clamp(0., 1.) as f32
+        }
+    }
+
+    /// "1.2 GB of 3.4 GB · about 4 min left".
+    pub(crate) fn label(&self) -> String {
+        let mut s = format!("{} of {}", human_size(self.done), human_size(self.total));
+        if let Some(left) = self.left {
+            s.push_str(&format!(" · about {} left", left_label(left)));
+        }
+        s
+    }
+}
+
+/// "under a minute", "4 min", "1 h 05 min".
+pub(crate) fn left_label(d: std::time::Duration) -> String {
+    let m = (d.as_secs_f64() / 60.).round() as u64;
+    match m {
+        0 => "under a minute".to_owned(),
+        m if m < 60 => format!("{m} min"),
+        m => format!("{} h {:02} min", m / 60, m % 60),
+    }
+}
+
+/// Works out overall progress for rows that are part of the current batch
+/// (not skipped or cancelled): finished items count fully, a running one
+/// by bytes read. The estimate uses the speed since the batch started and
+/// needs 3 s and 1 MB of history.
+pub(crate) fn overall(
+    rows: &[TransferRow],
+    batch_start: Option<(std::time::Instant, u64)>,
+) -> Option<Overall> {
+    let mut done = 0u64;
+    let mut total = 0u64;
+    for r in rows {
+        let size = r.size.unwrap_or(0);
+        match &r.state {
+            JobState::Skipped | JobState::Cancelled => continue,
+            JobState::Done | JobState::Overwritten | JobState::Failed { .. } => done += size,
+            JobState::Reading => done += r.progress.map_or(0, |(d, _)| d.min(size)),
+            JobState::Converting | JobState::Verifying => done += size,
+            JobState::Queued | JobState::Conflict => {}
+        }
+        total += size;
+    }
+    if total == 0 {
+        return None;
+    }
+    let left = batch_start.and_then(|(since, at)| {
+        let secs = since.elapsed().as_secs_f64();
+        let moved = done.saturating_sub(at);
+        (secs >= 3. && moved >= 1_000_000).then(|| {
+            let rate = moved as f64 / secs;
+            std::time::Duration::from_secs_f64((total - done) as f64 / rate)
+        })
+    });
+    Some(Overall { done, total, left })
 }
 
 pub(crate) struct ConflictPrompt {
@@ -72,6 +147,9 @@ pub(crate) struct Transfers {
     pub index: HashMap<JobId, usize>,
     pub paused: Option<String>,
     pub expanded: bool,
+    /// When the current batch of copies started, and the bytes already
+    /// done then (for the time-left estimate).
+    pub batch_start: Option<(std::time::Instant, u64)>,
     pub conflict: Option<ConflictPrompt>,
     pub scroll: UniformListScrollHandle,
     /// One-line result of the last panel action ("Exported 3 errors to …").
@@ -302,6 +380,7 @@ impl MainView {
                 name,
                 source,
                 dest,
+                size,
             } => {
                 t.index.insert(id, t.rows.len());
                 t.rows.push(TransferRow {
@@ -314,6 +393,7 @@ impl MainView {
                     finished_at: None,
                     started: None,
                     took: None,
+                    size,
                 });
                 t.expanded = true;
                 t.note = None;
@@ -422,7 +502,13 @@ impl MainView {
         let t = &self.transfers;
         let (done, failed, active, total) = t.counts();
 
+        let progress = (active > 0)
+            .then(|| overall(&t.rows, t.batch_start))
+            .flatten();
         let mut summary = format!("{done}/{total} done");
+        if let Some(p) = &progress {
+            summary.push_str(&format!(" · {}", p.label()));
+        }
         if failed > 0 {
             summary.push_str(&format!(" · {failed} failed"));
         }
@@ -551,6 +637,16 @@ impl MainView {
             .border_t_1()
             .border_color(theme.border)
             .bg(theme.sidebar)
+            // Overall progress along the panel's top edge.
+            .when_some(progress.as_ref().map(Overall::fraction), |d, f| {
+                d.child(div().w_full().h(px(3.)).bg(theme.muted).child(
+                    div().h_full().w(relative(f)).bg(if t.paused.is_some() {
+                        theme.warning
+                    } else {
+                        theme.primary
+                    }),
+                ))
+            })
             .child(header);
         if let Some(note) = t.note.clone() {
             panel = panel.child(div().px_4().pb_1().child(muted(note, &theme)));
@@ -938,6 +1034,44 @@ pub(crate) fn state_label(s: &JobState, progress: Option<(u64, u64)>) -> String 
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` macro.
     use super::{JobState, human_size, state_label};
+
+    fn row(state: JobState, size: u64, progress: Option<(u64, u64)>) -> super::TransferRow {
+        super::TransferRow {
+            id: 0,
+            name: String::new(),
+            source: String::new(),
+            dest: std::path::PathBuf::new(),
+            state,
+            progress,
+            finished_at: None,
+            started: None,
+            took: None,
+            size: Some(size),
+        }
+    }
+
+    #[test]
+    fn overall_progress_by_bytes() {
+        let rows = vec![
+            row(JobState::Done, 100, None),
+            row(JobState::Reading, 200, Some((50, 200))),
+            row(JobState::Queued, 300, None),
+            row(JobState::Skipped, 999, None),
+        ];
+        let p = super::overall(&rows, None).unwrap();
+        assert_eq!((p.done, p.total), (150, 600));
+        assert_eq!(p.fraction(), 0.25);
+        assert_eq!(p.left, None);
+        assert_eq!(super::overall(&[], None), None);
+    }
+
+    #[test]
+    fn time_left_labels() {
+        use std::time::Duration;
+        assert_eq!(super::left_label(Duration::from_secs(20)), "under a minute");
+        assert_eq!(super::left_label(Duration::from_secs(250)), "4 min");
+        assert_eq!(super::left_label(Duration::from_secs(3900)), "1 h 05 min");
+    }
 
     #[test]
     fn labels() {
