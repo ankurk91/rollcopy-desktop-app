@@ -12,7 +12,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{Icon, Sizable as _};
+use gpui_kit::component::{ActiveTheme as _, Icon, Selectable as _, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rollcopy_library::MediaKind;
@@ -97,6 +97,24 @@ impl MainView {
             .or_insert_with(|| rollcopy_convert::image_size(path))
     }
 
+    /// Zooms the viewer's photo by `factor` (fit = 1).
+    pub(crate) fn zoom_viewer(&mut self, factor: f32, cx: &mut Context<Self>) {
+        let next = (self.viewer_zoom * factor).clamp(1., self.viewer_max_zoom);
+        if next != self.viewer_zoom {
+            if next == 1. {
+                self.viewer_pan = (0., 0.);
+            }
+            self.viewer_zoom = next;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn reset_viewer_zoom(&mut self) {
+        self.viewer_zoom = 1.;
+        self.viewer_pan = (0., 0.);
+        self.viewer_drag = None;
+    }
+
     pub(crate) fn render_viewer(
         &mut self,
         window: &mut Window,
@@ -116,6 +134,11 @@ impl MainView {
             self.request_full(next);
         }
 
+        // Zoom and pan belong to one photo.
+        if self.viewer_for != Some(idx) {
+            self.viewer_for = Some(idx);
+            self.reset_viewer_zoom();
+        }
         let a = self.assets().get(idx)?.clone();
         let key = a.device_path();
         let total = self.visible.len();
@@ -141,8 +164,35 @@ impl MainView {
             f32::from(viewport.width) - 2. * SIDE,
             f32::from(viewport.height) - HEADER_H - FOOTER_H - BOTTOM,
         );
-        let (w, h) = fit(dims, room);
-        let contained = |p: PathBuf| {
+        let (fit_w, fit_h) = fit(dims, room);
+        // Zoom works on the full photo only (not a thumbnail or a video).
+        let zoomable = full_path.is_some() && !veiled;
+        self.viewer_max_zoom = if zoomable {
+            (dims.0 as f32 / fit_w).clamp(2., 8.)
+        } else {
+            1.
+        };
+        if !zoomable {
+            self.reset_viewer_zoom();
+        }
+        let zoom = self.viewer_zoom;
+        let (w, h) = (fit_w * zoom, fit_h * zoom);
+        // Keep the photo covering its box: pan at most to its edges.
+        let max_pan = (((w - room.0) / 2.).max(0.), ((h - room.1) / 2.).max(0.));
+        self.viewer_pan = (
+            self.viewer_pan.0.clamp(-max_pan.0, max_pan.0),
+            self.viewer_pan.1.clamp(-max_pan.1, max_pan.1),
+        );
+        let pan = self.viewer_pan;
+        let copied_path = self.in_dest.get(&key).cloned().flatten();
+        let copied_rel = self.copy_settings().and_then(|s| {
+            copied_path.as_ref().map(|p| {
+                p.strip_prefix(&s.dest)
+                    .map(|r| r.display().to_string())
+                    .unwrap_or_else(|_| p.display().to_string())
+            })
+        });
+        let contained = move |p: PathBuf| {
             img(p)
                 .w(px(w))
                 .h(px(h))
@@ -275,6 +325,29 @@ impl MainView {
                                 .text_color(hsla(0., 0., 0.75, 1.))
                                 .child(format!("{} / {total}", pos + 1)),
                         )
+                        .when_some(copied_path.clone(), |d, path| {
+                            d.child(
+                                btn("viewer-show")
+                                    .small()
+                                    .ghost()
+                                    .icon(IconName::FolderOpen)
+                                    .label("Show in folder")
+                                    .tooltip("Open the copy in the file manager")
+                                    .on_click(move |_, _, _| crate::desktop::show_in_folder(&path)),
+                            )
+                        })
+                        .child(
+                            btn("viewer-info-toggle")
+                                .small()
+                                .ghost()
+                                .icon(IconName::Info)
+                                .tooltip("Details (I)")
+                                .when(self.viewer_info, |b| b.selected(true))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.viewer_info = !this.viewer_info;
+                                    cx.notify();
+                                })),
+                        )
                         .child(
                             btn("viewer-close")
                                 .small()
@@ -289,6 +362,7 @@ impl MainView {
                 )
                 .child(
                     div()
+                        .id("viewer-photo")
                         .relative()
                         .flex_1()
                         .min_h_0()
@@ -297,7 +371,73 @@ impl MainView {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(image)
+                        .when(zoomable && zoom > 1., |d| {
+                            d.cursor(if self.viewer_drag.is_some() {
+                                CursorStyle::ClosedHand
+                            } else {
+                                CursorStyle::OpenHand
+                            })
+                        })
+                        // Wheel zooms; double-click toggles fit / 100%.
+                        .on_scroll(cx.listener(move |this, ev: &ScrollEvent, _, cx| {
+                            if !zoomable {
+                                return;
+                            }
+                            let dy = match ev.delta {
+                                ScrollDelta::Lines(p) => p.y,
+                                ScrollDelta::Pixels(p) => p.y / px(1.) / 40.,
+                            };
+                            if dy != 0. {
+                                this.zoom_viewer(1.15_f32.powf(dy.clamp(-3., 3.)), cx);
+                            }
+                        }))
+                        .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                            if zoomable && ev.click_count() >= 2 {
+                                if this.viewer_zoom > 1. {
+                                    this.reset_viewer_zoom();
+                                } else {
+                                    let actual = this.viewer_max_zoom.min(dims.0 as f32 / fit_w);
+                                    this.viewer_zoom = actual.max(2.).min(this.viewer_max_zoom);
+                                }
+                                cx.notify();
+                            }
+                        }))
+                        // Drag to move a zoomed photo.
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, ev: &MouseDownEvent, _, _| {
+                                if this.viewer_zoom > 1. {
+                                    this.viewer_drag = Some(ev.position);
+                                }
+                            }),
+                        )
+                        .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
+                            let Some(last) = this.viewer_drag else {
+                                return;
+                            };
+                            if ev.pressed_button != Some(MouseButton::Left) {
+                                this.viewer_drag = None;
+                                return;
+                            }
+                            this.viewer_pan.0 += (ev.position.x - last.x) / px(1.);
+                            this.viewer_pan.1 += (ev.position.y - last.y) / px(1.);
+                            this.viewer_drag = Some(ev.position);
+                            cx.notify();
+                        }))
+                        .on_mouse_up(
+                            MouseButton::Left,
+                            cx.listener(|this, _: &MouseUpEvent, _, cx| {
+                                this.viewer_drag = None;
+                                cx.notify();
+                            }),
+                        )
+                        .child(
+                            div()
+                                .relative()
+                                .left(px(pan.0))
+                                .top(px(pan.1))
+                                .child(image),
+                        )
                         .when_some(overlay, |d, o| {
                             d.child(
                                 div()
@@ -310,7 +450,34 @@ impl MainView {
                             )
                         })
                         .child(left)
-                        .child(right),
+                        .child(right)
+                        .when(self.viewer_info, |d| {
+                            let theme = cx.theme().clone();
+                            d.child(
+                                div()
+                                    .id("viewer-info")
+                                    .absolute()
+                                    .top_0()
+                                    .right_0()
+                                    .bottom_0()
+                                    .w(px(320.))
+                                    .p_4()
+                                    .bg(theme.background)
+                                    .text_color(theme.foreground)
+                                    .border_l_1()
+                                    .border_color(theme.border)
+                                    .overflow_y_scroll()
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .child(crate::preview::info_rows(
+                                        &a,
+                                        copied_rel.clone(),
+                                        &theme,
+                                        cx,
+                                    )),
+                            )
+                        }),
                 )
                 .child(
                     h_flex()
@@ -322,7 +489,11 @@ impl MainView {
                             div()
                                 .text_xs()
                                 .text_color(hsla(0., 0., 0.6, 1.))
-                                .child("← → move   Esc close"),
+                                .child(if zoomable {
+                                    "← → move   scroll / double-click zoom   drag move   I details   Esc close"
+                                } else {
+                                    "← → move   I details   Esc close"
+                                }),
                         ),
                 )
                 .into_any_element(),

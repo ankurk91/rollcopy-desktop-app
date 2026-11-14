@@ -55,6 +55,7 @@ actions!(
         ReportIssue,
         ReloadLibrary,
         FocusSearch,
+        ToggleInfo,
         ZoomIn,
         ZoomOut,
         ZoomReset,
@@ -84,6 +85,7 @@ const GRID_KEYS: &str = "Rollcopy && !Input";
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("ctrl-f", FocusSearch, Some(KEY_CONTEXT)),
+        KeyBinding::new("i", ToggleInfo, Some(GRID_KEYS)),
         KeyBinding::new("ctrl-=", ZoomIn, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-+", ZoomIn, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl--", ZoomOut, Some(KEY_CONTEXT)),
@@ -144,6 +146,17 @@ pub struct MainView {
     pub(crate) thumbs: HashMap<String, Thumb>,
     /// Full-window viewer showing the focused item.
     pub(crate) viewer_open: bool,
+    /// Viewer zoom (1 = fit the window), pan offset and the item they're for.
+    pub(crate) viewer_zoom: f32,
+    /// Largest useful zoom for the photo on screen (its own pixels, at
+    /// least 2×), worked out when it's drawn.
+    pub(crate) viewer_max_zoom: f32,
+    pub(crate) viewer_pan: (f32, f32),
+    pub(crate) viewer_for: Option<usize>,
+    /// Mouse position at the last move of a drag to pan.
+    pub(crate) viewer_drag: Option<Point<Pixels>>,
+    /// Details panel in the viewer (`i`).
+    pub(crate) viewer_info: bool,
     /// Full-size photos for the viewer, by device path.
     pub(crate) full: HashMap<String, crate::viewer::Full>,
     /// Hidden-album items the user chose to see this session, by device
@@ -336,6 +349,12 @@ impl MainView {
             focused: None,
             thumbs: HashMap::new(),
             viewer_open: false,
+            viewer_zoom: 1.,
+            viewer_max_zoom: 2.,
+            viewer_pan: (0., 0.),
+            viewer_for: None,
+            viewer_drag: None,
+            viewer_info: false,
             full: HashMap::new(),
             revealed: HashSet::new(),
             list_view: saved_ui.list_view,
@@ -624,9 +643,35 @@ impl Render for MainView {
                         window.remove_window();
                     }
                 }))
-                .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom(1, cx)))
-                .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom(-1, cx)))
-                .on_action(cx.listener(|this, _: &ZoomReset, _, cx| this.zoom(0, cx)))
+                // In the viewer the zoom keys zoom the photo, not the grid.
+                .on_action(cx.listener(|this, _: &ZoomIn, _, cx| {
+                    if this.viewer_open {
+                        this.zoom_viewer(1.25, cx)
+                    } else {
+                        this.zoom(1, cx)
+                    }
+                }))
+                .on_action(cx.listener(|this, _: &ZoomOut, _, cx| {
+                    if this.viewer_open {
+                        this.zoom_viewer(0.8, cx)
+                    } else {
+                        this.zoom(-1, cx)
+                    }
+                }))
+                .on_action(cx.listener(|this, _: &ZoomReset, _, cx| {
+                    if this.viewer_open {
+                        this.reset_viewer_zoom();
+                        cx.notify();
+                    } else {
+                        this.zoom(0, cx)
+                    }
+                }))
+                .on_action(cx.listener(|this, _: &ToggleInfo, _, cx| {
+                    if this.viewer_open {
+                        this.viewer_info = !this.viewer_info;
+                        cx.notify();
+                    }
+                }))
                 .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                     this.search.update(cx, |s, cx| s.focus(window, cx));
                 }))

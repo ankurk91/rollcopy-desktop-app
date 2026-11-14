@@ -116,6 +116,8 @@ packaging/install-local.sh --uninstall
 | Space / Enter / double-click | View the photo full-window (videos open in your player) |
 | Ctrl+F | Search by name, place, album, app or camera |
 | Ctrl+= / Ctrl+− / Ctrl+0 | Bigger / smaller / default thumbnails (also Ctrl+scroll) |
+| In the viewer: scroll, double-click, drag | Zoom, 100%, move a zoomed photo |
+| I | Details (in the viewer) |
 | F5 / Ctrl+R | Reload the library from the iPhone (new photos) |
 | Ctrl+, | Preferences |
 | F1 | Keyboard shortcuts |

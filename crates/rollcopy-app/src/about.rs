@@ -50,6 +50,11 @@ pub(crate) const SHORTCUTS: &[(&str, &str)] = &[
         "Ctrl+= / Ctrl+− / Ctrl+0",
         "Bigger / smaller / default thumbnails (or Ctrl+scroll)",
     ),
+    (
+        "Viewer: scroll / double-click / drag",
+        "Zoom / 100% / move the photo",
+    ),
+    ("I", "Details in the viewer"),
     ("F5 / Ctrl+R", "Reload the library from the iPhone"),
     ("Ctrl+,", "Preferences"),
     ("F1", "This list"),

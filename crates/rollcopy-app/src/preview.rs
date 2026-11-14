@@ -157,6 +157,19 @@ impl MainView {
                                 })),
                         )
                     })
+                    .when_some(
+                        self.in_dest.get(&a.device_path()).cloned().flatten(),
+                        |d, path| {
+                            d.child(
+                                btn("show-copy")
+                                    .small()
+                                    .ghost()
+                                    .icon(IconName::FolderOpen)
+                                    .tooltip("Show the copy in the file manager")
+                                    .on_click(move |_, _, _| crate::desktop::show_in_folder(&path)),
+                            )
+                        },
+                    )
                     .child(
                         btn("open-focused")
                             .small()
@@ -205,7 +218,7 @@ fn source_label(a: &Asset) -> Option<String> {
     })
 }
 
-fn info_rows(
+pub(crate) fn info_rows(
     a: &Asset,
     copied_to: Option<String>,
     theme: &Theme,

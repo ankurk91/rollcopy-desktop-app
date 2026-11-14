@@ -3,6 +3,7 @@
 mod about;
 mod columns;
 mod config;
+mod desktop;
 mod events;
 mod filters;
 mod grid;
@@ -76,6 +77,7 @@ gpui_kit_assets::icon_assets!(
         Trash,
         X,
         Image,
+        Info,
         Images,
         Lock,
         Plug,
