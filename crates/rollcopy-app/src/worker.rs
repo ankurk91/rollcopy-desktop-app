@@ -621,9 +621,19 @@ async fn open_file(
     name: &str,
     paths: &CachePaths,
 ) -> Result<(Option<String>, Option<String>), DeviceError> {
+    // HEIC is shown as a JPG: many image viewers (Mint's Xviewer among
+    // them) can't read HEIC at all.
+    let is_heic = name
+        .rsplit_once('.')
+        .is_some_and(|(_, e)| e.eq_ignore_ascii_case("heic") || e.eq_ignore_ascii_case("heif"));
+    let shown_name = if is_heic {
+        format!("{}.jpg", name.rsplit_once('.').map_or(name, |(s, _)| s))
+    } else {
+        name.to_owned()
+    };
     // Find out first whether anything can open it (no point copying a
     // large video otherwise), and whether it can likely play it.
-    let file_name = name.to_owned();
+    let file_name = shown_name.clone();
     let check = tokio::task::spawn_blocking(move || crate::players::check(&file_name))
         .await
         .map_err(|e| DeviceError::Other(e.to_string()))?;
@@ -643,8 +653,24 @@ async fn open_file(
         fs.copy_to_local(device_path, &part, |_| {}).await?;
         tokio::fs::rename(&part, &dest).await?;
     }
+    let shown = if is_heic {
+        let jpg = dir.join(&shown_name);
+        if !tokio::fs::try_exists(&jpg).await.unwrap_or(false) {
+            let (src, out) = (dest.clone(), part_path(&jpg));
+            let converted = tokio::task::spawn_blocking(move || {
+                rollcopy_convert::heic_to_jpeg(&src, &out, rollcopy_convert::DEFAULT_JPEG_QUALITY)
+            })
+            .await
+            .map_err(|e| DeviceError::Other(e.to_string()))?;
+            converted.map_err(|e| DeviceError::Other(e.to_string()))?;
+            tokio::fs::rename(part_path(&jpg), &jpg).await?;
+        }
+        jpg
+    } else {
+        dest
+    };
     let status = tokio::process::Command::new("xdg-open")
-        .arg(&dest)
+        .arg(&shown)
         .status()
         .await?;
     if !status.success() {
