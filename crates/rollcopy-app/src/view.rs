@@ -54,6 +54,7 @@ actions!(
         ViewOnGitHub,
         ReportIssue,
         ReloadLibrary,
+        FocusSearch,
         CloseWindow,
         ShowAbout,
         ShowShortcuts,
@@ -74,20 +75,24 @@ impl Render for ResizePreview {
 /// Key context for the main window's bindings.
 pub(crate) const KEY_CONTEXT: &str = "Rollcopy";
 
+/// The grid's own keys don't apply while typing in a text box.
+const GRID_KEYS: &str = "Rollcopy && !Input";
+
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("ctrl-a", SelectAll, Some(KEY_CONTEXT)),
-        KeyBinding::new("escape", ClearSelection, Some(KEY_CONTEXT)),
-        KeyBinding::new("left", MoveLeft, Some(KEY_CONTEXT)),
-        KeyBinding::new("right", MoveRight, Some(KEY_CONTEXT)),
-        KeyBinding::new("up", MoveUp, Some(KEY_CONTEXT)),
-        KeyBinding::new("down", MoveDown, Some(KEY_CONTEXT)),
-        KeyBinding::new("shift-left", ExtendLeft, Some(KEY_CONTEXT)),
-        KeyBinding::new("shift-right", ExtendRight, Some(KEY_CONTEXT)),
-        KeyBinding::new("shift-up", ExtendUp, Some(KEY_CONTEXT)),
-        KeyBinding::new("shift-down", ExtendDown, Some(KEY_CONTEXT)),
-        KeyBinding::new("enter", OpenItem, Some(KEY_CONTEXT)),
-        KeyBinding::new("space", OpenItem, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-f", FocusSearch, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-a", SelectAll, Some(GRID_KEYS)),
+        KeyBinding::new("escape", ClearSelection, Some(GRID_KEYS)),
+        KeyBinding::new("left", MoveLeft, Some(GRID_KEYS)),
+        KeyBinding::new("right", MoveRight, Some(GRID_KEYS)),
+        KeyBinding::new("up", MoveUp, Some(GRID_KEYS)),
+        KeyBinding::new("down", MoveDown, Some(GRID_KEYS)),
+        KeyBinding::new("shift-left", ExtendLeft, Some(GRID_KEYS)),
+        KeyBinding::new("shift-right", ExtendRight, Some(GRID_KEYS)),
+        KeyBinding::new("shift-up", ExtendUp, Some(GRID_KEYS)),
+        KeyBinding::new("shift-down", ExtendDown, Some(GRID_KEYS)),
+        KeyBinding::new("enter", OpenItem, Some(GRID_KEYS)),
+        KeyBinding::new("space", OpenItem, Some(GRID_KEYS)),
         // App-wide (PLAN §6 ☰ menu).
         KeyBinding::new("ctrl-,", OpenPreferences, None),
         KeyBinding::new("ctrl-q", Quit, None),
@@ -161,6 +166,9 @@ pub struct MainView {
     pub(crate) counts_dirty: bool,
     /// Sort by date taken, newest first (default) or oldest first.
     pub(crate) newest_first: bool,
+    /// Search box above the grid, and what's typed in it.
+    pub(crate) search: Entity<gpui_kit::component::input::InputState>,
+    pub(crate) query: String,
     pub(crate) grid_scroll: UniformListScrollHandle,
     /// Tiles per row at the last render; arrow keys move by this much.
     pub(crate) cols: usize,
@@ -239,6 +247,25 @@ impl MainView {
             this.sync_tray(cx);
         });
         // Preferences changed (here or in the Preferences window): apply them.
+        let search = cx.new(|cx| {
+            gpui_kit::component::input::InputState::new(window, cx)
+                .placeholder("Search name, place, album, app")
+        });
+        let searched = cx.subscribe_in(
+            &search,
+            window,
+            |this, state, ev: &gpui_kit::component::input::InputEvent, _, cx| {
+                if let gpui_kit::component::input::InputEvent::Change = ev {
+                    let q = state.read(cx).value().to_string();
+                    if q.trim() != this.query.trim() {
+                        this.query = q;
+                        this.counts_dirty = true;
+                        this.recompute_visible();
+                        cx.notify();
+                    }
+                }
+            },
+        );
         let prefs = cx.observe_global_in::<Prefs>(window, |this, window, cx| {
             let new = Prefs::get(cx).config.clone();
             if new.app.theme != this.config.app.theme {
@@ -300,6 +327,8 @@ impl MainView {
             sync_counts: [0; 3],
             counts_dirty: false,
             newest_first: true,
+            search,
+            query: String::new(),
             grid_scroll: UniformListScrollHandle::new(),
             cols: 1,
             tile: crate::grid::MIN_TILE,
@@ -330,7 +359,7 @@ impl MainView {
             was_active: false,
             notified_pause: None,
             _tasks: vec![task],
-            _subscriptions: vec![appearance, prefs],
+            _subscriptions: vec![appearance, prefs, searched],
         };
         this.maybe_check_on_startup(cx);
         this
@@ -544,6 +573,9 @@ impl Render for MainView {
                     if this.confirm_close(window, cx) {
                         window.remove_window();
                     }
+                }))
+                .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
+                    this.search.update(cx, |s, cx| s.focus(window, cx));
                 }))
                 .on_action(cx.listener(|this, _: &ReloadLibrary, _, cx| {
                     this.reload_library();

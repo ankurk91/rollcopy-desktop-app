@@ -69,10 +69,11 @@ impl MainView {
         };
         let mut counts = [0; 4];
         let mut sync = [0; 3];
+        let query = Query::new(&self.query);
         for a in library
             .assets
             .iter()
-            .filter(|a| tree.contains(sel, a, show_hidden))
+            .filter(|a| tree.contains(sel, a, show_hidden) && query.matches(a))
         {
             for (n, f) in counts.iter_mut().zip(Filter::ALL) {
                 if f.matches(a) {
@@ -99,12 +100,14 @@ impl MainView {
             self.visible.clear();
             return;
         };
+        let query = Query::new(&self.query);
         let mut visible: Vec<usize> = library
             .assets
             .iter()
             .enumerate()
             .filter(|(_, a)| {
                 tree.contains(sel, a, show_hidden)
+                    && query.matches(a)
                     && filter.matches(a)
                     && sync.matches(self.is_copied(&a.device_path()))
             })
@@ -123,6 +126,37 @@ impl MainView {
     /// Whether the item with this device path is known to be copied.
     pub(crate) fn is_copied(&self, key: &str) -> bool {
         matches!(self.in_dest.get(key), Some(Some(_)))
+    }
+}
+
+/// The search box: every word must appear (case-insensitive) in the file
+/// name, place, an album, the app that saved it or the camera. Empty
+/// matches everything.
+pub(crate) struct Query(Vec<String>);
+
+impl Query {
+    pub(crate) fn new(text: &str) -> Self {
+        Self(text.split_whitespace().map(str::to_lowercase).collect())
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub(crate) fn matches(&self, a: &rollcopy_library::Asset) -> bool {
+        if self.0.is_empty() {
+            return true;
+        }
+        let mut hay = a.filename.to_lowercase();
+        for extra in [&a.place, &a.source_app, &a.camera].into_iter().flatten() {
+            hay.push('\n');
+            hay.push_str(&extra.to_lowercase());
+        }
+        for album in &a.albums {
+            hay.push('\n');
+            hay.push_str(&album.to_lowercase());
+        }
+        self.0.iter().all(|w| hay.contains(w.as_str()))
     }
 }
 
@@ -150,7 +184,7 @@ pub(crate) fn sort_by_date(
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` macro.
-    use super::{Filter, SyncFilter, sort_by_date};
+    use super::{Filter, Query, SyncFilter, sort_by_date};
     use chrono::{TimeZone, Utc};
     use rollcopy_library::{Asset, MediaKind};
 
@@ -171,6 +205,22 @@ mod tests {
         assert!(Filter::All.matches(&photo) && Filter::All.matches(&video));
         assert!(SyncFilter::Copied.matches(true) && !SyncFilter::Copied.matches(false));
         assert!(SyncFilter::NotCopied.matches(false) && SyncFilter::All.matches(true));
+    }
+
+    #[test]
+    fn search_matches_every_word_anywhere() {
+        let mut a = item("IMG_0042.HEIC", MediaKind::Photo, Some(1));
+        a.place = Some("1 Example Street, Springfield".into());
+        a.albums = vec!["Holiday 2026".into()];
+        a.source_app = Some("Snapchat".into());
+        assert!(Query::new("").matches(&a));
+        assert!(Query::new("img_0042").matches(&a));
+        assert!(Query::new("0042 heic").matches(&a));
+        assert!(Query::new("springfield").matches(&a));
+        assert!(Query::new("holiday snap").matches(&a));
+        assert!(!Query::new("holiday whatsapp").matches(&a));
+        assert!(!Query::new("IMG_0043").matches(&a));
+        assert!(Query::new("   ").is_empty());
     }
 
     #[test]

@@ -73,6 +73,7 @@ gpui_kit_assets::icon_assets!(
         Lock,
         Plug,
         RefreshCw,
+        Search,
         ShieldCheck,
         ShieldX,
         Smartphone,

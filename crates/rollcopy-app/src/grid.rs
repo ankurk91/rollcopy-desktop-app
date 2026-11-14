@@ -201,6 +201,14 @@ impl MainView {
                     )
                     .child(muted(summary, &theme))
                     .child(div().flex_1())
+                    .child(
+                        div().w(px(240.)).flex_shrink_1().min_w(px(120.)).child(
+                            gpui_kit::component::input::Input::new(&self.search)
+                                .small()
+                                .cleanable(true)
+                                .prefix(Icon::new(IconName::Search).small()),
+                        ),
+                    )
                     .when(!self.visible.is_empty(), |d| {
                         d.child(
                             btn("select-all")
@@ -710,7 +718,9 @@ impl MainView {
     /// Why the grid is empty, and the one action that helps.
     fn render_empty(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
-        let filtered = self.filter != Filter::All || self.sync_filter != SyncFilter::All;
+        let searching = !crate::filters::Query::new(&self.query).is_empty();
+        let filtered =
+            searching || self.filter != Filter::All || self.sync_filter != SyncFilter::All;
         let show_hidden = self.config.library.show_hidden;
         let library_empty = !self
             .assets()
@@ -721,6 +731,15 @@ impl MainView {
                 IconName::Images,
                 "No photos or videos on this iPhone",
                 "Take a photo, or check that Photos isn't still syncing from iCloud.".into(),
+            )
+        } else if searching {
+            (
+                IconName::Search,
+                "Nothing matches your search",
+                format!(
+                    "No item here has \"{}\" in its name, place, album, app or camera.",
+                    self.query.trim()
+                ),
             )
         } else if filtered {
             let what = match (self.filter, self.sync_filter) {
@@ -766,6 +785,8 @@ impl MainView {
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.filter = Filter::All;
                             this.sync_filter = SyncFilter::All;
+                            this.query.clear();
+                            this.search.update(cx, |s, cx| s.set_value("", window, cx));
                             this.recompute_visible();
                             window.focus(&this.focus, cx);
                             cx.notify();

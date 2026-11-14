@@ -45,6 +45,7 @@ pub(crate) const SHORTCUTS: &[(&str, &str)] = &[
         "Space / Enter / double-click",
         "View the item full-window (videos: open the player)",
     ),
+    ("Ctrl+F", "Search by name, place, album, app or camera"),
     ("F5 / Ctrl+R", "Reload the library from the iPhone"),
     ("Ctrl+,", "Preferences"),
     ("F1", "This list"),
