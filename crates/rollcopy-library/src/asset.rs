@@ -106,6 +106,30 @@ impl Asset {
             .map_or(self.filename.as_str(), |(s, _)| s)
     }
 
+    /// A Live Photo's motion part as an item of its own: the `.MOV` with the
+    /// same name next to the photo in `DCIM` (where iOS keeps it). Same
+    /// capture time, so it's sorted and recognised as copied like the photo.
+    /// `None` for anything that isn't a Live Photo.
+    pub fn live_motion(&self) -> Option<Asset> {
+        if !self.live_photo || self.kind != MediaKind::Photo {
+            return None;
+        }
+        let mut m = Asset::new(
+            self.directory.clone(),
+            format!("{}.MOV", self.stem()),
+            MediaKind::Video,
+        );
+        m.captured = self.captured;
+        m.tz_offset_secs = self.tz_offset_secs;
+        m.location = self.location;
+        m.favorite = self.favorite;
+        m.source_app = self.source_app.clone();
+        m.camera = self.camera.clone();
+        m.place = self.place.clone();
+        m.albums = self.albums.clone();
+        Some(m)
+    }
+
     /// Taken with the front camera (from the lens name, Photos DB only).
     pub fn is_selfie(&self) -> bool {
         self.lens
@@ -242,6 +266,18 @@ mod tests {
         let a = Asset::new("DCIM/100APPLE", "IMG_0057.HEIC", MediaKind::Photo);
         assert_eq!(a.stem(), "IMG_0057");
         assert_eq!(a.device_path(), "/DCIM/100APPLE/IMG_0057.HEIC");
+    }
+
+    #[test]
+    fn live_photo_motion_is_the_mov_beside_it() {
+        let mut a = Asset::new("DCIM/100APPLE", "IMG_0001.HEIC", MediaKind::Photo);
+        assert!(a.live_motion().is_none());
+        a.live_photo = true;
+        let m = a.live_motion().unwrap();
+        assert_eq!(m.device_path(), "/DCIM/100APPLE/IMG_0001.MOV");
+        assert_eq!(m.kind, MediaKind::Video);
+        assert!(!m.live_photo && m.live_motion().is_none());
+        assert_eq!(m.save_plan().to_ext, "MP4");
     }
 
     #[test]

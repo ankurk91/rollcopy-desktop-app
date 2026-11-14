@@ -247,9 +247,19 @@ impl MainView {
         let Some(udid) = self.udid().map(str::to_owned) else {
             return;
         };
-        let assets: Vec<Asset> = assets.into_iter().filter(|a| !a.trashed).collect();
+        let mut assets: Vec<Asset> = assets.into_iter().filter(|a| !a.trashed).collect();
         if assets.is_empty() {
             return;
+        }
+        // Live Photos' motion parts, right after their photos, if wanted.
+        if self.config.conversion.live_motion {
+            assets = assets
+                .into_iter()
+                .flat_map(|a| {
+                    let motion = a.live_motion();
+                    std::iter::once(a).chain(motion)
+                })
+                .collect();
         }
         self.send_queue_settings();
         let _ = self

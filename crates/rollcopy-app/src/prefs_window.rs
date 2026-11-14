@@ -209,6 +209,19 @@ fn pages() -> Vec<SettingPage> {
                             "Lossless keeps the iPhone's HDR video as is (plays in VLC, Android, \
                              iPhone). H.264 converts to standard colour and is much slower.",
                         ),
+                    )
+                    .item(
+                        SettingItem::new(
+                            "Live Photos: also copy the motion",
+                            SettingField::switch(
+                                |cx| Prefs::get(cx).config.conversion.live_motion,
+                                |v, cx| Prefs::update_config(cx, |c| c.conversion.live_motion = v),
+                            ),
+                        )
+                        .description(
+                            "Saves the short video part next to the photo (IMG_0001.MP4 in that \
+                             month's videos folder). Off: the still photo only.",
+                        ),
                     ),
             ),
         SettingPage::new("Library").group(

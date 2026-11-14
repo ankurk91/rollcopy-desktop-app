@@ -34,7 +34,8 @@ on the way.
   - HEIC → JPG (keeps colour profile and EXIF, applies rotation)
   - MOV → MP4 (lossless by default; optional H.264 re-encode for old devices, using the GPU through
     VA-API and Vulkan when available)
-  - Edited photos and videos are copied as edited; Live Photos as the still.
+  - Edited photos and videos are copied as edited; Live Photos as the still, optionally with the
+    motion part as a video (Preferences → Conversion).
 - **Safe copying**: files are written to a temporary file, checked, then renamed, so a failed copy
   never damages an existing file. Already-copied items are recognised in the folder by name and
   capture time. iPhones reuse names like `IMG_0057` after 9,999 photos; a different photo with the
@@ -156,7 +157,8 @@ Yes, while copying. HEIC photos become JPG (quality 92 by default, colour profil
 MOV videos become MP4. JPG, PNG and MP4 files are copied unchanged.
 
 **Does it copy Live Photos and edited photos?**
-Edited photos and videos are copied as edited. Live Photos are copied as the still photo.
+Edited photos and videos are copied as edited. Live Photos are copied as the still photo; turn on
+*Preferences → Conversion → Live Photos: also copy the motion* to get the moving part as a video too.
 
 **Does it work on Fedora, Arch or other distributions?**
 The `.deb` is for Ubuntu 24.04+ and its derivatives. The AppImage may run on other 64-bit distributions

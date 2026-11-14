@@ -78,6 +78,8 @@ impl Default for Destination {
 pub struct Conversion {
     pub jpeg_quality: u8,
     pub video: VideoPref,
+    /// Also copy each Live Photo's motion part as a video.
+    pub live_motion: bool,
 }
 
 impl Default for Conversion {
@@ -85,6 +87,7 @@ impl Default for Conversion {
         Self {
             jpeg_quality: 92,
             video: VideoPref::Lossless,
+            live_motion: false,
         }
     }
 }
