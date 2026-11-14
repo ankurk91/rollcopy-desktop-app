@@ -74,6 +74,8 @@ gpui_kit_assets::icon_assets!(
         Plug,
         RefreshCw,
         Search,
+        ZoomIn,
+        ZoomOut,
         ShieldCheck,
         ShieldX,
         Smartphone,

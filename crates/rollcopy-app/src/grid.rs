@@ -8,7 +8,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rollcopy_library::{MediaKind, Source};
@@ -17,8 +17,32 @@ use crate::tree::{Selection, month_name};
 use crate::view::{Filter, LEFT_W, LibState, MainView, SyncFilter, Thumb, btn, muted};
 use crate::worker::{Command, ThumbReq, phone_thumb_path};
 
-/// Smallest tile; tiles stretch so each row fills the width.
-pub(crate) const MIN_TILE: f32 = 132.;
+/// Thumbnail size the user picks (zoom): the smallest a tile may be; tiles
+/// stretch so each row fills the width. The phone's thumbnails are
+/// 480×360, so tiles past ~300 px would only get blurrier.
+pub(crate) const TILE_DEFAULT: f32 = 132.;
+pub(crate) const TILE_MIN: f32 = 80.;
+pub(crate) const TILE_MAX: f32 = 300.;
+/// Each zoom step changes the size by this factor.
+const ZOOM_FACTOR: f32 = 1.2;
+/// Touchpad scrolling (pixel deltas) per zoom step.
+const ZOOM_PIXELS: f32 = 60.;
+
+/// Columns and tile size for `avail` pixels of row width and a tile size
+/// of at least `target`.
+pub(crate) fn layout(avail: f32, target: f32) -> (usize, f32) {
+    let avail = avail.max(target);
+    let cols = (((avail + GAP) / (target + GAP)).floor() as usize).max(1);
+    let tile = ((avail - GAP * (cols as f32 - 1.)) / cols as f32).floor();
+    (cols, tile)
+}
+
+/// The tile size `steps` zoom steps from `current` (positive = bigger).
+pub(crate) fn zoomed(current: f32, steps: i32) -> f32 {
+    (current * ZOOM_FACTOR.powi(steps))
+        .round()
+        .clamp(TILE_MIN, TILE_MAX)
+}
 const GAP: f32 = 8.;
 pub(crate) const PAD: f32 = 16.;
 /// Room for the scrollbar so the last column never sits under it.
@@ -35,10 +59,63 @@ impl MainView {
         } else {
             0.
         };
-        let avail = (width - LEFT_W - preview - 2. * PAD - SCROLLBAR).max(MIN_TILE);
-        let cols = (((avail + GAP) / (MIN_TILE + GAP)).floor() as usize).max(1);
-        let tile = ((avail - GAP * (cols as f32 - 1.)) / cols as f32).floor();
-        (cols, tile)
+        layout(
+            width - LEFT_W - preview - 2. * PAD - SCROLLBAR,
+            self.tile_target,
+        )
+    }
+
+    /// Changes the thumbnail size by `steps` (0 = back to the default),
+    /// keeps the focused item in view, and remembers the size.
+    pub(crate) fn zoom(&mut self, steps: i32, cx: &mut Context<Self>) {
+        let next = if steps == 0 {
+            TILE_DEFAULT
+        } else {
+            zoomed(self.tile_target, steps)
+        };
+        if next == self.tile_target {
+            return;
+        }
+        self.tile_target = next;
+        crate::prefs::Prefs::update_ui(cx, |ui| ui.tile_size = next);
+        self.scroll_focused_into_view_later = true;
+        cx.notify();
+    }
+
+    /// Ctrl+wheel over the grid zooms. Registered for the capture phase so
+    /// the list doesn't scroll at the same time.
+    fn zoom_wheel_listener(cx: &mut Context<Self>) -> impl IntoElement {
+        let view = cx.entity().downgrade();
+        canvas(
+            |_, _, _| (),
+            move |bounds, (), window, _| {
+                window.on_mouse_event(move |ev: &ScrollEvent, phase, _, cx| {
+                    if phase != DispatchPhase::Capture
+                        || !ev.modifiers.control
+                        || !bounds.contains(&ev.position)
+                    {
+                        return;
+                    }
+                    cx.stop_propagation();
+                    let _ = view.update(cx, |this, cx| {
+                        let steps = match ev.delta {
+                            ScrollDelta::Lines(p) => p.y.signum() as i32,
+                            ScrollDelta::Pixels(p) => {
+                                this.zoom_pixels += p.y / px(1.);
+                                let steps = (this.zoom_pixels / ZOOM_PIXELS).trunc();
+                                this.zoom_pixels -= steps * ZOOM_PIXELS;
+                                steps as i32
+                            }
+                        };
+                        if steps != 0 {
+                            this.zoom(steps, cx);
+                        }
+                    });
+                });
+            },
+        )
+        .absolute()
+        .inset_0()
     }
 
     /// Width of the centre pane's content (between its side paddings).
@@ -66,6 +143,14 @@ impl MainView {
         self.list_row_w = self.content_width(window);
         self.cols = cols;
         self.tile = tile;
+        if std::mem::take(&mut self.scroll_focused_into_view_later)
+            && let Some(pos) = self
+                .focused
+                .and_then(|i| self.visible.iter().position(|&v| v == i))
+        {
+            self.grid_scroll
+                .scroll_to_item(pos / cols.max(1), ScrollStrategy::Center);
+        }
         let rows = self.visible.len().div_ceil(cols);
 
         let header = self.render_grid_header(cx).into_any_element();
@@ -105,6 +190,7 @@ impl MainView {
                 .relative()
                 .flex_1()
                 .min_h_0()
+                .child(Self::zoom_wheel_listener(cx))
                 .child(
                     uniform_list(
                         "grid",
@@ -285,6 +371,35 @@ impl MainView {
                         ))
                     })
                     .child(div().flex_1())
+                    .when(!self.list_view, |d| {
+                        d.child(
+                            h_flex()
+                                .child(
+                                    btn("zoom-out")
+                                        .small()
+                                        .ghost()
+                                        .icon(IconName::ZoomOut)
+                                        .tooltip("Smaller thumbnails (Ctrl+−)")
+                                        .disabled(self.tile_target <= TILE_MIN)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.zoom(-1, cx);
+                                            window.focus(&this.focus, cx);
+                                        })),
+                                )
+                                .child(
+                                    btn("zoom-in")
+                                        .small()
+                                        .ghost()
+                                        .icon(IconName::ZoomIn)
+                                        .tooltip("Bigger thumbnails (Ctrl+=, or Ctrl+scroll)")
+                                        .disabled(self.tile_target >= TILE_MAX)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.zoom(1, cx);
+                                            window.focus(&this.focus, cx);
+                                        })),
+                                ),
+                        )
+                    })
                     .child(
                         h_flex()
                             .child(
@@ -794,5 +909,28 @@ impl MainView {
                 )
             })
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TILE_DEFAULT, TILE_MAX, TILE_MIN, layout, zoomed};
+
+    #[test]
+    fn tiles_fill_the_row() {
+        // 8 px gaps: 4 tiles of 132 need 552 px.
+        assert_eq!(layout(600., 132.), (4, 144.));
+        // Bigger zoom, fewer columns.
+        assert_eq!(layout(600., 280.), (2, 296.));
+        // Narrower than one tile: one tile, never zero.
+        assert_eq!(layout(50., 132.).0, 1);
+    }
+
+    #[test]
+    fn zoom_steps_stay_in_range() {
+        assert_eq!(zoomed(TILE_DEFAULT, 1), 158.);
+        assert_eq!(zoomed(TILE_DEFAULT, -1), 110.);
+        assert_eq!(zoomed(TILE_DEFAULT, 20), TILE_MAX);
+        assert_eq!(zoomed(TILE_DEFAULT, -20), TILE_MIN);
     }
 }

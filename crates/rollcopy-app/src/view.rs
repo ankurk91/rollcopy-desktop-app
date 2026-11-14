@@ -55,6 +55,9 @@ actions!(
         ReportIssue,
         ReloadLibrary,
         FocusSearch,
+        ZoomIn,
+        ZoomOut,
+        ZoomReset,
         CloseWindow,
         ShowAbout,
         ShowShortcuts,
@@ -81,6 +84,10 @@ const GRID_KEYS: &str = "Rollcopy && !Input";
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("ctrl-f", FocusSearch, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-=", ZoomIn, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-+", ZoomIn, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl--", ZoomOut, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-0", ZoomReset, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-a", SelectAll, Some(GRID_KEYS)),
         KeyBinding::new("escape", ClearSelection, Some(GRID_KEYS)),
         KeyBinding::new("left", MoveLeft, Some(GRID_KEYS)),
@@ -166,6 +173,13 @@ pub struct MainView {
     pub(crate) counts_dirty: bool,
     /// Sort by date taken, newest first (default) or oldest first.
     pub(crate) newest_first: bool,
+    /// Thumbnail size the user zoomed to (see `grid::TILE_*`).
+    pub(crate) tile_target: f32,
+    /// Touchpad Ctrl+scroll not yet turned into a zoom step.
+    pub(crate) zoom_pixels: f32,
+    /// After a zoom the columns change: bring the focused item back into
+    /// view on the next layout.
+    pub(crate) scroll_focused_into_view_later: bool,
     /// Search box above the grid, and what's typed in it.
     pub(crate) search: Entity<gpui_kit::component::input::InputState>,
     pub(crate) query: String,
@@ -329,9 +343,18 @@ impl MainView {
             newest_first: true,
             search,
             query: String::new(),
+            tile_target: if saved_ui.tile_size > 0. {
+                saved_ui
+                    .tile_size
+                    .clamp(crate::grid::TILE_MIN, crate::grid::TILE_MAX)
+            } else {
+                crate::grid::TILE_DEFAULT
+            },
+            zoom_pixels: 0.,
+            scroll_focused_into_view_later: false,
             grid_scroll: UniformListScrollHandle::new(),
             cols: 1,
-            tile: crate::grid::MIN_TILE,
+            tile: crate::grid::TILE_DEFAULT,
             preview_w: saved_ui.preview_width.max(PREVIEW_MIN_W),
             status: None,
             reloading: false,
@@ -574,6 +597,9 @@ impl Render for MainView {
                         window.remove_window();
                     }
                 }))
+                .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom(1, cx)))
+                .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom(-1, cx)))
+                .on_action(cx.listener(|this, _: &ZoomReset, _, cx| this.zoom(0, cx)))
                 .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                     this.search.update(cx, |s, cx| s.focus(window, cx));
                 }))

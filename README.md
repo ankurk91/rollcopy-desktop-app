@@ -18,7 +18,7 @@ on the way.
 
 ## Features
 
-- **Browse the Photos library**: by year and month, or by **album**; filters (photos, videos,
+- **Browse the Photos library**: by year and month, or by **album**; zoomable thumbnails; filters (photos, videos,
   edited, copied / not copied), sort by date taken, keyboard navigation, and a full-window viewer
   (Space), and **search** by name, place, album, app or camera (Ctrl+F). A **list view** with resizable columns shows names, dates and sizes without any
   thumbnails: quicker, and nothing on screen for people looking over your shoulder. Photos taken
@@ -114,6 +114,7 @@ packaging/install-local.sh --uninstall
 | Ctrl+A / Esc | Select all / clear the selection (Esc also closes the viewer) |
 | Space / Enter / double-click | View the photo full-window (videos open in your player) |
 | Ctrl+F | Search by name, place, album, app or camera |
+| Ctrl+= / Ctrl+− / Ctrl+0 | Bigger / smaller / default thumbnails (also Ctrl+scroll) |
 | F5 / Ctrl+R | Reload the library from the iPhone (new photos) |
 | Ctrl+, | Preferences |
 | F1 | Keyboard shortcuts |

@@ -214,6 +214,8 @@ pub struct UiState {
     pub list_view: bool,
     /// List column widths in pixels.
     pub list_columns: Vec<f32>,
+    /// Grid thumbnail size (zoom) in pixels; 0 = the default.
+    pub tile_size: f32,
     /// Transfers panel column widths in pixels.
     pub transfer_columns: Vec<f32>,
     /// Height of the transfer list in pixels.
@@ -230,6 +232,7 @@ impl Default for UiState {
             transfers_expanded: true,
             list_view: false,
             list_columns: Vec::new(),
+            tile_size: 0.,
             transfer_columns: Vec::new(),
             transfers_height: crate::transfers::PANEL_H,
             last_update_check: None,
