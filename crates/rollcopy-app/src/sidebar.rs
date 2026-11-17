@@ -356,6 +356,10 @@ impl MainView {
                         cx.notify();
                     }))
                     .into_any_element(),
+                (_, Selection::All) => div()
+                    .w(px(16.))
+                    .child(Icon::new(IconName::Images).xsmall())
+                    .into_any_element(),
                 (_, Selection::Hidden) => div()
                     .w(px(16.))
                     .child(Icon::new(IconName::EyeOff).xsmall())

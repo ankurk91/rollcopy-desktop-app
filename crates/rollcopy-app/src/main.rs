@@ -80,6 +80,7 @@ gpui_kit_assets::icon_assets!(
         Image,
         Info,
         Images,
+        CheckCheck,
         Lock,
         Plug,
         RefreshCw,

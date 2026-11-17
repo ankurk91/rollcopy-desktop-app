@@ -118,12 +118,11 @@ impl MainView {
                 .text_color(muted),
             )
             .when(self.is_copied(&key), |d| {
-                d.child(Icon::new(IconName::RefreshCw).small().text_color(hsla(
-                    96. / 360.,
-                    0.62,
-                    0.55,
-                    1.,
-                )))
+                d.child(
+                    Icon::new(IconName::CheckCheck)
+                        .small()
+                        .text_color(crate::grid::COPIED_GREEN),
+                )
             })
             .into_any_element();
         let text = |s: String, color: Option<Hsla>| {

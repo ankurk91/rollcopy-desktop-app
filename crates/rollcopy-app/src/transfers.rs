@@ -309,6 +309,85 @@ impl MainView {
         self.copy_assets(assets);
     }
 
+    /// "Copy all N items?" before copying everything shown.
+    pub(crate) fn render_copy_all_prompt(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.copy_all_prompt {
+            return None;
+        }
+        let theme = cx.theme().clone();
+        let items: Vec<&Asset> = self
+            .visible
+            .iter()
+            .map(|&i| &self.assets()[i])
+            .filter(|a| !a.trashed)
+            .collect();
+        let n = items.len();
+        let bytes: u64 = items.iter().filter_map(|a| a.original_size).sum();
+        let already = items
+            .iter()
+            .filter(|a| self.is_copied(&a.device_path()))
+            .count();
+        let dest = self.dest_root().map(|d| tilde(&d)).unwrap_or_default();
+        let mut body = format!(
+            "{n} item{} ({}) will be copied to {dest}.",
+            if n == 1 { "" } else { "s" },
+            human_size(bytes)
+        );
+        if already > 0 {
+            body.push_str(&format!(
+                " {already} of them are copied already; {}",
+                match self.config.destination.on_conflict {
+                    crate::config::ConflictPref::Ask => "you'll be asked what to do with those.",
+                    crate::config::ConflictPref::Skip => "those are skipped.",
+                    crate::config::ConflictPref::Overwrite => "those are copied again.",
+                }
+            ));
+        }
+        let card =
+            v_flex()
+                .w(px(460.))
+                .p_5()
+                .gap_3()
+                .rounded_lg()
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.background)
+                .shadow_lg()
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(format!(
+                    "Copy all {n} item{}?",
+                    if n == 1 { "" } else { "s" }
+                )))
+                .child(muted(body, &theme))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .child(btn("copy-all-cancel").outline().label("Cancel").on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.copy_all_prompt = false;
+                                window.focus(&this.focus, cx);
+                                cx.notify();
+                            }),
+                        ))
+                        .child(
+                            btn("copy-all-yes")
+                                .primary()
+                                .icon(IconName::Copy)
+                                .label("Copy all")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.copy_all_prompt = false;
+                                    this.copy_visible();
+                                    window.focus(&this.focus, cx);
+                                    cx.notify();
+                                })),
+                        ),
+                );
+        Some(crate::about::overlay(
+            "copy-all-backdrop",
+            card.into_any_element(),
+        ))
+    }
+
     pub(crate) fn copy_focused(&mut self) {
         if let Some(a) = self.focused.and_then(|i| self.assets().get(i)).cloned() {
             self.copy_assets(vec![a]);

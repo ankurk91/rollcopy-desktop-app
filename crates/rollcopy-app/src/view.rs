@@ -226,6 +226,8 @@ pub struct MainView {
     pub(crate) preview_open: bool,
     /// "Copies are still running" prompt on window close.
     pub(crate) quit_prompt: bool,
+    /// "Copy all N items?" is showing.
+    pub(crate) copy_all_prompt: bool,
     pub(crate) about_open: bool,
     pub(crate) shortcuts_open: bool,
     /// First-run guide (`welcome.rs`).
@@ -405,6 +407,7 @@ impl MainView {
             in_dest: HashMap::new(),
             preview_open: false,
             quit_prompt: false,
+            copy_all_prompt: false,
             about_open: false,
             shortcuts_open: false,
             welcome_open: !saved_ui.welcomed,
@@ -486,7 +489,12 @@ impl MainView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Esc closes the viewer first.
+        // Esc cancels the Copy all prompt, then closes the viewer.
+        if self.copy_all_prompt {
+            self.copy_all_prompt = false;
+            cx.notify();
+            return;
+        }
         if self.viewer_open {
             self.viewer_open = false;
             cx.notify();
@@ -733,7 +741,8 @@ impl Render for MainView {
                 .children(self.render_shortcuts(cx))
                 .children(self.render_welcome(cx))
                 .children(self.render_update_dialog(cx))
-                .children(self.render_quit_prompt(cx)),
+                .children(self.render_quit_prompt(cx))
+                .children(self.render_copy_all_prompt(cx)),
         )
     }
 }

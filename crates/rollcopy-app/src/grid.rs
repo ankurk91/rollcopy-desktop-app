@@ -201,6 +201,7 @@ impl MainView {
                     )
                     .size_full()
                     .px(px(PAD))
+                    .pt(px(8.))
                     .pb(px(PAD)),
                 )
                 .vertical_scrollbar(&self.grid_list)
@@ -280,11 +281,17 @@ impl MainView {
             })
             .collect();
 
+        // A band of its own (the shade of the sidebar and transfers panel)
+        // with a line below, so the controls don't run into the photos.
         v_flex()
+            .flex_shrink_0()
             .px(px(PAD))
             .pt(px(PAD))
             .pb_3()
             .gap_2()
+            .bg(theme.sidebar)
+            .border_b_1()
+            .border_color(theme.border)
             .child(
                 h_flex()
                     .gap_3()
@@ -445,8 +452,9 @@ impl MainView {
                                 .outline()
                                 .label(format!("Copy all ({copyable})"))
                                 .tooltip("Copy everything shown here")
+                                // A big action: ask first (Copy selected doesn't).
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.copy_visible();
+                                    this.copy_all_prompt = true;
                                     cx.notify();
                                 })),
                         )
@@ -728,7 +736,23 @@ impl MainView {
                     .top_1()
                     .right_1()
                     .gap_1()
-                    .when(a.live_photo, |d| d.child(badge("LIVE".into())))
+                    .when(a.live_photo, |d| {
+                        d.child(
+                            div()
+                                .id(("live", pos))
+                                .size(px(20.))
+                                .rounded_full()
+                                .bg(hsla(0., 0., 0., 0.55))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .tooltip(|window, cx| {
+                                    gpui_kit::component::tooltip::Tooltip::new("Live Photo")
+                                        .build(window, cx)
+                                })
+                                .child(Icon::new(IconName::CircleDot).xsmall().text_color(white())),
+                        )
+                    })
                     .when(a.is_edited(), |d| d.child(badge("EDITED".into()))),
             )
             // Already in the Save-to folder (from what's on disk, PLAN §7.5).
@@ -739,21 +763,23 @@ impl MainView {
                         .absolute()
                         .bottom_1()
                         .right_1()
-                        .p_0p5()
-                        .rounded_sm()
-                        .bg(hsla(0., 0., 0., 0.6))
+                        .size(px(22.))
+                        .rounded_full()
+                        .bg(hsla(0., 0., 0., 0.55))
+                        .flex()
+                        .items_center()
+                        .justify_center()
                         .tooltip(|window, cx| {
                             gpui_kit::component::tooltip::Tooltip::new(
                                 "Copied: already in the Save to folder",
                             )
                             .build(window, cx)
                         })
-                        .child(Icon::new(IconName::RefreshCw).small().text_color(hsla(
-                            96. / 360.,
-                            0.62,
-                            0.55,
-                            1.,
-                        ))),
+                        .child(
+                            Icon::new(IconName::CheckCheck)
+                                .small()
+                                .text_color(COPIED_GREEN),
+                        ),
                 )
             })
             .when(selected, |d| {
@@ -892,6 +918,14 @@ impl MainView {
         });
     }
 }
+
+/// The "already copied" mark.
+pub(crate) const COPIED_GREEN: Hsla = Hsla {
+    h: 142. / 360.,
+    s: 0.71,
+    l: 0.45,
+    a: 1.,
+};
 
 /// Icon for a type filter chip.
 fn filter_icon(f: Filter) -> IconName {
