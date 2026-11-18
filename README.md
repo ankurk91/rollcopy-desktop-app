@@ -121,69 +121,21 @@ packaging/install-local.sh --uninstall
    month or album you're viewing. Switch between the grid and the list
    with the buttons next to *Newest first*.
 4. Change where files go with **Save to** (📁) or in **Preferences** (⚙ or Ctrl+,).
-5. Took new photos while plugged in? Press **↻** next to the phone's name (or F5).
+5. Took new photos while plugged in? Press **↻** in the toolbar (or F5).
 
-| Key | Action |
-|---|---|
-| ← → ↑ ↓ | Move between items |
-| Shift + arrows | Extend the selection |
-| Ctrl+A / Esc | Select all / clear the selection (Esc also closes the viewer) |
-| Space / Enter / double-click | View the photo full-window (videos open in your player) |
-| Ctrl+F | Search by name, place, album, app or camera |
-| Ctrl+= / Ctrl+− / Ctrl+0 | Bigger / smaller / default thumbnails (also Ctrl+scroll) |
-| In the viewer: scroll, double-click, drag | Zoom, 100%, move a zoomed photo |
-| I | Details (in the viewer) |
-| F5 / Ctrl+R | Reload the library from the iPhone (new photos) |
-| Ctrl+, | Preferences |
-| F1 | Keyboard shortcuts |
-| Ctrl+Q | Quit |
+Keyboard: arrow keys move, Shift+arrows extend the selection, Space opens the viewer, Ctrl+F
+searches and I shows or hides the info pane. Press **F1** in the app for the full list.
 
-## Troubleshooting
+## Help
 
-- **"Open folder" / "Show in folder" does nothing or takes ages (Linux Mint):** a stuck Nemo
-  window process makes every new folder wait for it. Run `nemo -q`, then try again.
-- **Photos open in an error in the image viewer:** Rollcopy's *Open* turns HEIC into JPG first, so
-  any viewer can show it; copies you make are JPG already.
-- **"The connection keeps dropping" / phone not detected:** try another cable or USB port, without
-  a hub. Many cheap cables only charge.
-- **"Unlock your iPhone and tap Trust" doesn't go away:** unplug, unlock the phone, plug in again and
-  tap **Trust**. If you tapped **Don't Trust**, unplugging and plugging in asks again.
-- **Saving to a network share:** shares opened in Files (`smb://…`, under `/run/user/…/gvfs/`), sshfs
-  and some USB-drive FUSE drivers work. Rollcopy still never replaces a file that's already there.
-- **Videos don't play (fresh Ubuntu):** Ubuntu's video player can't decode iPhone (HEVC) or app
-  (H.264) videos until its codecs are installed: `sudo apt install gstreamer1.0-libav`, or install
-  VLC. Rollcopy says so when you *Open* a video and the codecs are missing. The copied files are fine.
-- **Videos play in black and white:** iPhone videos are HDR (HLG / Dolby Vision). Some Linux players,
-  such as Celluloid/mpv on some setups, show these in black and white. The file is fine; VLC,
-  Android and iPhone play it in colour. To get standard-colour H.264 files, choose
-  *Preferences → Conversion → Videos → H.264 (slower)*.
-- **Something failed:** the transfer panel shows the reason. *Export error report* saves a CSV, and
-  `~/.local/state/rollcopy/rollcopy.log` has the app's log.
+- [Troubleshooting](docs/TROUBLESHOOTING.md): phone not detected, Trust prompt, videos that won't
+  play or play in black and white, slow "Show in folder", network shares.
+- [FAQ](docs/FAQ.md): HEIC to JPG, Live Photos and edited photos, other distributions, deleting
+  from the phone.
 
 Please report problems with *☰ → Report an Issue*: it opens a GitHub issue form with the version,
 Linux version and phone model filled in (never the phone's name or serial). Or use
 [Issues](https://github.com/ankurk91/rollcopy-desktop-app/issues) directly.
-
-## FAQ
-
-**How do I transfer photos from an iPhone to Ubuntu or Linux Mint?**
-Install Rollcopy, connect the iPhone with a USB cable, tap **Trust** on the phone, select the photos
-and click **Copy selected**. No iTunes, iCloud or Apple account is needed.
-
-**Can it convert HEIC to JPG?**
-Yes, while copying. HEIC photos become JPG (quality 92 by default, colour profile and EXIF kept) and
-MOV videos become MP4. JPG, PNG and MP4 files are copied unchanged.
-
-**Does it copy Live Photos and edited photos?**
-Edited photos and videos are copied as edited. Live Photos are copied as the still photo; turn on
-*Preferences → Conversion → Live Photos: also copy the motion* to get the moving part as a video too.
-
-**Does it work on Fedora, Arch or other distributions?**
-The `.deb` is for Ubuntu 24.04+ and its derivatives. The AppImage may run on other 64-bit distributions
-with glibc 2.39 or newer, with `usbmuxd` and `ffmpeg` installed; this isn't tested yet.
-
-**Can it delete photos from the iPhone or free up space?**
-No. Rollcopy only reads from the phone; it never changes or deletes anything on it.
 
 ## Where Rollcopy keeps things
 

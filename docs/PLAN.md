@@ -453,7 +453,8 @@ The device, library, convert and queue crates have no UI dependency, so they can
 - Faster cold CI builds (a `ci` profile with unoptimised dependencies).
 
 **Reach**
-- Listings: AppImageHub, AlternativeTo, AUR; later Flathub (Flatpak needs access to the host's usbmuxd socket).
+- Listings: AppImageHub, AUR; later Flathub (Flatpak needs access to the host's usbmuxd socket).
+- ~~AlternativeTo~~: listed 2026-11-18, https://alternativeto.net/software/rollcopy/
 - A landing page (GitHub Pages) and a repo social-preview image.
 - ~~Own app icon~~ (done for 0.1.1).
 

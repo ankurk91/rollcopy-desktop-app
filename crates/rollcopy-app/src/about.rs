@@ -30,8 +30,8 @@ const CREDITS: &[(&str, &str)] = &[
     ("Lucide icons", "ISC/MIT"),
 ];
 
-/// Keyboard shortcuts (shown with F1 or ☰ → Keyboard Shortcuts; keep the
-/// README table in sync).
+/// Keyboard shortcuts (shown with F1 or ☰ → Keyboard Shortcuts). The
+/// README names only a few and points here.
 pub(crate) const SHORTCUTS: &[(&str, &str)] = &[
     ("← → ↑ ↓", "Move between items"),
     ("Shift + arrows", "Extend the selection"),
