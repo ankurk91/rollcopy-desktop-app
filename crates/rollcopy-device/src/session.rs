@@ -63,6 +63,20 @@ pub async fn list_devices() -> Result<Vec<DeviceRef>> {
         .collect())
 }
 
+/// The USB attachment of `udid`. With Wi-Fi sync on, usbmuxd may also
+/// list the phone over the network, sometimes first; Rollcopy only uses the
+/// cable (review C9).
+async fn usb_device(
+    mux: &mut UsbmuxdConnection,
+    udid: &str,
+) -> Result<idevice::usbmuxd::UsbmuxdDevice> {
+    let devices = mux.get_devices().await.map_err(usbmuxd_unavailable)?;
+    devices
+        .into_iter()
+        .find(|d| d.udid == udid && d.connection_type == Connection::Usb)
+        .ok_or(DeviceError::NotConnected)
+}
+
 /// A trusted, unlocked connection to one phone.
 ///
 /// Opening a session proves the pairing works: it fails with
@@ -131,11 +145,7 @@ impl Session {
         let mut mux = UsbmuxdConnection::default()
             .await
             .map_err(usbmuxd_unavailable)?;
-        let device = match mux.get_device(udid).await {
-            Ok(d) => d,
-            Err(idevice::IdeviceError::DeviceNotFound) => return Err(DeviceError::NotConnected),
-            Err(e) => return Err(e.into()),
-        };
+        let device = usb_device(&mut mux, udid).await?;
         let pairing = mux.get_pair_record(udid).await.map_err(pair_record_error)?;
 
         let provider = device.to_provider(UsbmuxdAddr::default(), LABEL);
@@ -234,11 +244,7 @@ pub async fn pair(udid: &str) -> Result<()> {
     let mut mux = UsbmuxdConnection::default()
         .await
         .map_err(usbmuxd_unavailable)?;
-    let device = match mux.get_device(udid).await {
-        Ok(d) => d,
-        Err(idevice::IdeviceError::DeviceNotFound) => return Err(DeviceError::NotConnected),
-        Err(e) => return Err(e.into()),
-    };
+    let device = usb_device(&mut mux, udid).await?;
     let buid = mux.get_buid().await?;
     let provider = device.to_provider(UsbmuxdAddr::default(), LABEL);
     let mut lockdown = LockdownClient::connect(&provider).await?;

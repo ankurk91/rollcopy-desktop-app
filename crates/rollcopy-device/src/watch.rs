@@ -122,6 +122,12 @@ enum PairOutcome {
     Stop(Phase),
 }
 
+/// The phone to follow: the first one on a cable. Network entries (Wi-Fi
+/// sync) are skipped; usbmuxd may list them first (review C9).
+fn first_usb(list: &[DeviceRef]) -> Option<DeviceRef> {
+    list.iter().find(|d| d.usb).cloned()
+}
+
 /// Decides what follows a pair request. "Still waiting for Trust" just
 /// waits; Don't Trust stops; a locked phone retries; anything else backs
 /// off (2 s, 4 s, …) and stops after [`MAX_PAIR_FAILURES`], because every
@@ -183,7 +189,7 @@ pub async fn watch(emit: impl FnMut(Phase)) {
     loop {
         let listed = list_devices().await;
         let first = match &listed {
-            Ok(list) => list.first().cloned(),
+            Ok(list) => first_usb(list),
             Err(_) => None,
         };
 
@@ -315,6 +321,18 @@ async fn open_and_read(udid: &str) -> Result<DeviceInfo, DeviceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn follows_the_phone_on_the_cable() {
+        let dev = |udid: &str, mux_id, usb| DeviceRef {
+            udid: udid.into(),
+            mux_id,
+            usb,
+        };
+        let list = [dev("net", 1, false), dev("cable", 2, true)];
+        assert_eq!(first_usb(&list).map(|d| d.udid), Some("cable".into()));
+        assert_eq!(first_usb(&list[..1]), None);
+    }
 
     #[test]
     fn waiting_for_trust_is_not_a_failure() {
