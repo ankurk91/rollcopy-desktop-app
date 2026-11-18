@@ -153,17 +153,18 @@ system light/dark setting unless one is picked.
 ├───────────────────┬───────────────────────────────────────┬───────────────────┤
 │ LIBRARY           │ All Media  660 items          Select all  Copy all │ Info            ⇥ │
 │  ▣ All Media  660 │ [▦ All 660][🖼 600][▶ 60][♥ 12] | Copied  Not copied   ↓ Newest first  − + | ▦ ☰ | ▯ │
-│ DEVICE            ├───────────────────────────────────────┤ ┌─────────────┐  │
-│  📱 My iPhone 84% │ September 2025  5 items                │ │   preview   │  │
-│  iPhone 15 · iOS 27│ ┌────┐┌────┐┌────┐┌────┐┌────┐        │ └─────────────┘  │
-│  ▬▬▬▬▬▬░░ 30 GB free│ │ ✓ ││ 🖼 ││▶0:42││ ◉ ││ ✓✓ │        │ IMG_0001.MOV     │
-│  ▸ 2026       120 │ └────┘└────┘└────┘└────┘└────┘        │ Video · 0:42 · 1 Sep 2025│
-│  ▾ 2025       210 │ October 2025  24 items                 │ [Copy] [Open] [Show in folder]│
-│      September  5 │ ┌────┐┌────┐ …                          │ DETAILS / SOURCE  │
-│ ALBUMS        3 ▸ │                                        │ LOCATION / COPY   │
-│ COLLECTIONS       │                                        │                   │
-│  ⊘ Hidden         │                                        │                   │
-│  🗑 Recently Deleted│                                       │                   │
+│ YEARS             ├───────────────────────────────────────┤ ┌─────────────┐  │
+│  ▸ 2026       120 │ September 2025  5 items                │ │   preview   │  │
+│  ▾ 2025       210 │ ┌────┐┌────┐┌────┐┌────┐┌────┐        │ └─────────────┘  │
+│      September  5 │ │ ✓ ││ 🖼 ││▶0:42││ ◉ ││ ✓✓ │        │ IMG_0001.MOV     │
+│ ALBUMS        3 ▸ │ └────┘└────┘└────┘└────┘└────┘        │ Video · 0:42 · 1 Sep 2025│
+│ COLLECTIONS       │ October 2025  24 items                 │ [Copy] [Open] [Show in folder]│
+│  ⊘ Hidden         │ ┌────┐┌────┐ …                          │ DETAILS / SOURCE  │
+│  🗑 Recently Deleted│                                       │ LOCATION / COPY   │
+│───────────────────│                                        │                   │
+│  📱 My iPhone 84% │                                        │                   │
+│  iPhone 15 · iOS 27│                                       │                   │
+│  ▬▬▬▬▬▬░░ 30 GB free│                                      │                   │
 ├───────────────────┴───────────────────────────────────────┴───────────────────┤
 │ ▸ ⟳ Copying 38 of 120  ▬▬▬░░ 1.2 GB of 4.1 GB · about 3 min left  Converting IMG_0002  [Pause] ⤓ 📁 │
 └───────────────────────────────────────────────────────────────────────────────┘
