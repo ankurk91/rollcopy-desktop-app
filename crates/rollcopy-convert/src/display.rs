@@ -40,9 +40,20 @@ pub fn display_jpeg(src: &Path, dst: &Path, max_side: u32) -> Result<(u32, u32),
         .unwrap_or_default();
     let (img, icc) = if matches!(ext.as_str(), "heic" | "heif") {
         let d = decode_heic(src)?;
-        let img = image::RgbImage::from_raw(d.width, d.height, d.rgb)
-            .ok_or_else(|| ConvertError::Decode("bad pixel buffer".into()))?;
-        (DynamicImage::ImageRgb8(img), d.icc)
+        let pixels = d.rgb()?;
+        let view =
+            image::ImageBuffer::<image::Rgb<u8>, &[u8]>::from_raw(d.width, d.height, &pixels)
+                .ok_or_else(|| ConvertError::Decode("bad pixel buffer".into()))?;
+        // Shrink straight from libheif's pixels; a full-size copy of a
+        // 48 MP photo is ~146 MB (review P3).
+        let img = if d.width.max(d.height) > max_side {
+            let (w, h) = fit(d.width, d.height, max_side);
+            image::imageops::resize(&view, w, h, FilterType::Triangle)
+        } else {
+            image::RgbImage::from_raw(d.width, d.height, pixels.to_vec())
+                .ok_or_else(|| ConvertError::Decode("bad pixel buffer".into()))?
+        };
+        (DynamicImage::ImageRgb8(img), d.icc.clone())
     } else {
         let mut decoder = ImageReader::open(src)?
             .with_guessed_format()?
@@ -68,6 +79,13 @@ pub fn display_jpeg(src: &Path, dst: &Path, max_side: u32) -> Result<(u32, u32),
     let size = rgb.dimensions();
     write_jpeg(dst, rgb.as_raw(), size, QUALITY, icc, None)?;
     Ok(size)
+}
+
+/// `(w, h)` scaled to fit in a `max_side` square, keeping the shape.
+fn fit(w: u32, h: u32, max_side: u32) -> (u32, u32) {
+    let scale = f64::from(max_side) / f64::from(w.max(h));
+    let size = |v: u32| ((f64::from(v) * scale).round() as u32).clamp(1, max_side);
+    (size(w), size(h))
 }
 
 #[cfg(test)]

@@ -34,10 +34,44 @@ fn heif_err(e: libheif_rs::HeifError) -> ConvertError {
 pub(crate) struct Decoded {
     pub width: u32,
     pub height: u32,
-    pub rgb: Vec<u8>,
+    /// libheif's decoded image; [`Decoded::rgb`] lends its pixels.
+    image: libheif_rs::Image,
     pub icc: Option<Vec<u8>>,
     /// EXIF as raw TIFF, orientation reset to 1.
     pub exif: Option<Vec<u8>>,
+}
+
+impl Decoded {
+    /// The pixels as packed RGB rows. Borrowed from libheif when its rows
+    /// are already packed (the usual case), so a 48 MP photo isn't copied
+    /// (~146 MB) just to be encoded (review P3; audit PERF-06).
+    pub(crate) fn rgb(&self) -> Result<std::borrow::Cow<'_, [u8]>, ConvertError> {
+        let plane = self
+            .image
+            .planes()
+            .interleaved
+            .ok_or_else(|| ConvertError::Decode("no interleaved RGB plane".into()))?;
+        let row = self.width as usize * 3;
+        let h = self.height as usize;
+        if plane.stride == row {
+            let data = plane
+                .data
+                .get(..row * h)
+                .ok_or_else(|| ConvertError::Decode("short pixel data".into()))?;
+            return Ok(std::borrow::Cow::Borrowed(data));
+        }
+        let mut rgb = Vec::with_capacity(row * h);
+        for y in 0..h {
+            let start = y * plane.stride;
+            rgb.extend_from_slice(
+                plane
+                    .data
+                    .get(start..start + row)
+                    .ok_or_else(|| ConvertError::Decode("short pixel row".into()))?,
+            );
+        }
+        Ok(std::borrow::Cow::Owned(rgb))
+    }
 }
 
 /// Decodes the primary image of a HEIC/HEIF file. libheif applies the
@@ -50,39 +84,20 @@ pub(crate) fn decode_heic(src: &Path) -> Result<Decoded, ConvertError> {
     let handle = ctx.primary_image_handle().map_err(heif_err)?;
 
     let lib = LibHeif::new();
-    let decoded = lib
+    let image = lib
         .decode(&handle, ColorSpace::Rgb(RgbChroma::Rgb), None)
         .map_err(heif_err)?;
-    let plane = decoded
-        .planes()
-        .interleaved
-        .ok_or_else(|| ConvertError::Decode("no interleaved RGB plane".into()))?;
-    let (w, h) = (plane.width, plane.height);
-    let row = w as usize * 3;
-    let rgb = if plane.stride == row {
-        // Rows are already packed (audit PERF-06).
-        plane
-            .data
-            .get(..row * h as usize)
-            .ok_or_else(|| ConvertError::Decode("short pixel data".into()))?
-            .to_vec()
-    } else {
-        let mut rgb = Vec::with_capacity(row * h as usize);
-        for y in 0..h as usize {
-            let start = y * plane.stride;
-            rgb.extend_from_slice(
-                plane
-                    .data
-                    .get(start..start + row)
-                    .ok_or_else(|| ConvertError::Decode("short pixel row".into()))?,
-            );
-        }
-        rgb
+    let (width, height) = {
+        let plane = image
+            .planes()
+            .interleaved
+            .ok_or_else(|| ConvertError::Decode("no interleaved RGB plane".into()))?;
+        (plane.width, plane.height)
     };
     Ok(Decoded {
-        width: w,
-        height: h,
-        rgb,
+        width,
+        height,
+        image,
         icc: handle.color_profile_raw().map(|p| p.data),
         exif: read_exif(&handle),
     })
@@ -141,7 +156,17 @@ pub fn heic_to_jpeg_with(
         has_exif: d.exif.is_some(),
         has_icc: d.icc.is_some(),
     };
-    if let Err(e) = write_jpeg(dst, &d.rgb, (d.width, d.height), quality, d.icc, d.exif) {
+    let written = d.rgb().and_then(|rgb| {
+        write_jpeg(
+            dst,
+            &rgb,
+            (d.width, d.height),
+            quality,
+            d.icc.clone(),
+            d.exif.clone(),
+        )
+    });
+    if let Err(e) = written {
         // Don't leave a half-written file; the caller's guard may already
         // be gone (review C5).
         let _ = std::fs::remove_file(dst);
@@ -171,4 +196,62 @@ pub fn verify_jpeg(path: &Path) -> Result<(u32, u32), ConvertError> {
         .decode()
         .map_err(|e| ConvertError::Verify(format!("JPEG does not decode: {e}")))?;
     Ok((img.width(), img.height()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libheif_rs::{Channel, CompressionFormat, EncoderQuality};
+
+    /// A HEIC made here: left half red, right half blue. `w` odd makes
+    /// libheif pad its rows, so the repacking path runs too.
+    fn make_heic(path: &Path, w: u32, h: u32) {
+        let mut img = libheif_rs::Image::new(w, h, ColorSpace::Rgb(RgbChroma::Rgb)).unwrap();
+        img.create_plane(Channel::Interleaved, w, h, 8).unwrap();
+        {
+            let planes = img.planes_mut();
+            let p = planes.interleaved.unwrap();
+            for y in 0..h as usize {
+                for x in 0..w as usize {
+                    let px = &mut p.data[y * p.stride + x * 3..][..3];
+                    px.copy_from_slice(if x < w as usize / 2 {
+                        &[220, 20, 20]
+                    } else {
+                        &[20, 20, 220]
+                    });
+                }
+            }
+        }
+        let lib = LibHeif::new();
+        let mut enc = lib.encoder_for_format(CompressionFormat::Hevc).unwrap();
+        enc.set_quality(EncoderQuality::Lossy(90)).unwrap();
+        let mut ctx = HeifContext::new().unwrap();
+        ctx.encode_image(&img, &mut enc, None).unwrap();
+        ctx.write_to_file(path.to_str().unwrap()).unwrap();
+    }
+
+    /// Converted without copying the frame first (review P3): same size,
+    /// same colours, for packed and padded rows.
+    #[test]
+    fn heic_converts_to_jpeg() {
+        let dir = tempfile::tempdir().unwrap();
+        for (w, h) in [(64, 48), (37, 21)] {
+            let src = dir.path().join(format!("IMG_{w}.HEIC"));
+            let dst = dir.path().join(format!("IMG_{w}.JPG"));
+            make_heic(&src, w, h);
+            let info = heic_to_jpeg(&src, &dst, DEFAULT_JPEG_QUALITY).unwrap();
+            assert_eq!((info.width, info.height), (w, h));
+            let out = image::open(&dst).unwrap().to_rgb8();
+            assert_eq!(out.dimensions(), (w, h));
+            let (left, right) = (out.get_pixel(2, h / 2), out.get_pixel(w - 3, h / 2));
+            assert!(left[0] > 150 && left[2] < 100, "{w}: left {left:?}");
+            assert!(right[2] > 150 && right[0] < 100, "{w}: right {right:?}");
+
+            // The viewer's smaller copy, shrunk from the borrowed pixels.
+            let small = dir.path().join(format!("view_{w}.jpg"));
+            let (sw, sh) = crate::display_jpeg(&src, &small, 16).unwrap();
+            assert_eq!(sw.max(sh), 16, "{w}");
+            assert_eq!(image::open(&small).unwrap().width(), sw);
+        }
+    }
 }
