@@ -25,7 +25,7 @@ on the way.
 ## Features
 
 - **Browse the Photos library**: by year and month, or by **album**, with month headings in the
-  grid; zoomable thumbnails; sort by date taken; keyboard navigation.
+  grid; zoomable thumbnails; sort by date, name, size or type; keyboard navigation.
 - **Filters** for photos, videos, edited, favourites, Live Photos, screenshots and selfies, and
   copied / not copied; **search** by name, place, album, app or camera (Ctrl+F).
 - **Viewer** (Space): full-window, zoom and pan (scroll, double-click for 100%, drag), details (I),

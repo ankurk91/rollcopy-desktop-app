@@ -140,33 +140,37 @@ The app always shows exactly one clear next step. Each state is detected, not gu
 
 ## 6. Interface
 
-One window with three panes and a collapsible queue at the bottom. It uses a gpui-component theme and follows the system light/dark setting.
+One window: a toolbar, a sidebar, the media grid, an info pane on the right and a transfer dock at the
+bottom. The look (redesigned 2026-11-18, after 0.5.0) is a compact desktop media library: graphite greys
+in dark mode, light greys in light mode, thin separators instead of boxes, and one purple accent from the
+app icon for selection and actions. Every colour is in `crates/rollcopy-app/src/palette.rs`; `theme.rs`
+paints gpui-component's theme tokens from it, so changing the accent is a one-line edit. It follows the
+system light/dark setting unless one is picked.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
-│ ⬇ Rollcopy   [ Save to: ~/Pictures/Rollcopy/My iPhone  📁 ]  [Copy selected (12)]  ☰ │
+│ ☰ [Copy selected (12)] [Copy new (40)]   [Save to ~/Pictures/Rollcopy 📁]  🔍____  ⟳ ⚙ ◐ │
 ├───────────────────┬───────────────────────────────────────┬───────────────────┤
-│ DEVICES           │  All media ▸ 2025 ▸ September          │  PREVIEW          │
-│ ● My iPhone  │  [Photos][Videos][Edited][All]  🔍     │  ┌─────────────┐  │
-│   iPhone 15       │ ┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐  │  │             │  │
-│   iOS 27.0.1      │ │ 🖼 ││ 🖼 ││ ▶ ││ 🖼 ││ 🖼 ││ ▶ │  │  │   image /   │  │
-│   ▓▓▓▓▓░░ 98/128GB│ └────┘└────┘└────┘└────┘└────┘└────┘  │  │ video frame │  │
-│   🔋 84% charging │ ┌────┐┌────┐┌────┐┌────┐┌────┐┌────┐  │  └─────────────┘  │
-│                   │ │ ✓ ││ ✓ ││ 🖼 ││ ▶ ││ 🖼 ││ 🖼 │  │  IMG_3480.MOV     │
-│ LIBRARY           │ └────┘└────┘└────┘└────┘└────┘└────┘  │  Video · 0:42     │
-│  All media   660  │                                       │  1 Sep 2025 18:04 │
-│  ▸ 2026      120  │                                       │  3840×2160 HEVC   │
-│  ▾ 2025      210  │                                       │  23.6 MB          │
-│     September  5  │                                       │  Edited ✔         │
-│     October   24  │                                       │  → saves as MP4   │
-│  Recently Del. 141│ (greyed; off by default)               │  [Copy] [Open ▶]  │
+│ LIBRARY           │ All Media  660 items          Select all  Copy all │ Info            ⇥ │
+│  ▣ All Media  660 │ [▦ All 660][🖼 600][▶ 60][♥ 12] | Copied  Not copied   ↓ Newest first  − + | ▦ ☰ | ▯ │
+│ DEVICE            ├───────────────────────────────────────┤ ┌─────────────┐  │
+│  📱 My iPhone 84% │ September 2025  5 items                │ │   preview   │  │
+│  iPhone 15 · iOS 27│ ┌────┐┌────┐┌────┐┌────┐┌────┐        │ └─────────────┘  │
+│  ▬▬▬▬▬▬░░ 30 GB free│ │ ✓ ││ 🖼 ││▶0:42││ ◉ ││ ✓✓ │        │ IMG_0001.MOV     │
+│  ▸ 2026       120 │ └────┘└────┘└────┘└────┘└────┘        │ Video · 0:42 · 1 Sep 2025│
+│  ▾ 2025       210 │ October 2025  24 items                 │ [Copy] [Open] [Show in folder]│
+│      September  5 │ ┌────┐┌────┐ …                          │ DETAILS / SOURCE  │
+│ ALBUMS        3 ▸ │                                        │ LOCATION / COPY   │
+│ COLLECTIONS       │                                        │                   │
+│  ⊘ Hidden         │                                        │                   │
+│  🗑 Recently Deleted│                                       │                   │
 ├───────────────────┴───────────────────────────────────────┴───────────────────┤
-│ ▾ Transfers  37/120 · 1.2 GB of 4.1 GB · 2 failed · ~3 min        [Pause] [⋯] │
-│   ✔ IMG_3477.JPG   ✔ IMG_3478.MP4   ⟳ IMG_3480.MP4 ▓▓▓░░ 61%   ✖ IMG_3482 ⓘ │
+│ ▸ ⟳ Copying 38 of 120  ▬▬▬░░ 1.2 GB of 4.1 GB · about 3 min left  Converting IMG_0002  [Pause] ⤓ 📁 │
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Toolbar**
+- Left: ☰ app menu, **Copy selected (n)** and **Copy new (n)**. Middle: the **Save to** folder as a field. Right: search (Ctrl+F), Reload, Preferences, theme, GitHub. The phone's name is in the sidebar, not here.
 - **Save to**: shows the destination folder for the selected device. 📁 opens a folder picker. The default is `~/Pictures/Rollcopy/<device name>/`, and the choice is remembered (§8a).
 - **☰ app menu**:
   - Preferences… (Ctrl+,)
@@ -176,18 +180,20 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
   - About Rollcopy
   - Quit (Ctrl+Q)
 
-**Left pane: devices and library**
-- Device card with name, model, iOS version, storage bar and battery. "Details" opens the serial number, UDID and iCloud Backup hint.
+**Left pane: sidebar**
+- Sections: LIBRARY (All Media), DEVICE (the phone, then its years and months, then Undated), ALBUMS (click the heading to open or close), COLLECTIONS (Hidden, Recently Deleted). Rows are 26 px; the selected one has a purple tint and an accent icon.
+- Device block with name and battery, model and iOS on one line, a thin storage bar with space free. "Details" opens the serial number, UDID and iCloud Backup hint.
 - The library tree is grouped **year → month** by capture date. An "On-phone folders" view (`100APPLE`, …) is available as an advanced toggle.
 - Recently Deleted is listed with its count but greyed out, and excluded from "copy folder". It's off by default (Preferences → Library).
 - **Hidden album** (audit SEC-01, 2026-11-13): iOS locks it behind Face ID or the passcode, so its items are left out of the tree, the grid, the counts and every copy action, and their cached thumbnails are deleted. Preferences → Library → *Show Hidden album* lists them under their own **Hidden** node, never inside All media, so "Copy all" never includes them.
 - **Blurred Hidden items and list view** (2026-11-13, at the user's request). With *Show Hidden album* on, Hidden items show a tiny, blurred copy of their thumbnail (`<thumb>.veil.jpg`, 48 px) with an 👁 button. Clicking it reveals that item until quit, until it's blurred again from the preview pane, or until the preference is turned off. No full-size image is fetched while an item is blurred. A grid/list toggle in the header switches to a list without thumbnails (name, date, size, file size, tags, copied mark); no thumbnails are requested in list mode. The choice is saved in `ui.toml`.
 
 **Centre pane: thumbnail grid**
-- Filter chips: All / Photos / Videos / Edited, plus Copied / Not copied (click the active one again to turn it off). Copied state comes from the destination folder, as for the badges.
-- Sort by date taken: Newest first (default) / Oldest first; undated items last.
+- A library bar above the grid: title and item count, Select all / Clear selection / Copy all; then a row of filter toggles (icon and count), Copied / Not copied, the sort menu, zoom −/+, grid/list and the info pane toggle.
+- Filter toggles: All / Photos / Videos / Edited / Favourites / Live / Screenshots / Selfies, plus Copied / Not copied (click the active one again to turn it off). They combine with the sidebar selection (Videos in one month). Copied state comes from the destination folder, as for the badges.
+- Sort (menu): Date taken (default, newest first), Name, Size or Type (file extension), each either way. Items without the value go last; ties go newest first. Month headings only appear in date order.
 - Place and Location in the info panel have copy-to-clipboard buttons.
-- Badges on each tile: ▶ video with duration, EDITED and LIVE text badges (a pencil looked clickable), and a green sync icon for items already in the current destination folder. Selection is a separate blue ✓.
+- Thumbnails are square, 160 px by default. Marks on each tile are small dark discs or pills: video icon with duration (bottom left), Edited and Live (top right, with tooltips), and a green double tick for items already in the current destination folder (bottom right). Selection is an accent outline with an accent ✓ (top left).
 - Selection: click, Ctrl+click, Shift+click, Ctrl+A, Esc to clear.
 - Keyboard (added in M3 at the user's request): ← → ↑ ↓ move the focused item and update the preview, Shift+arrows extend the selection, Space / Enter open the item.
 - The preview pane is resizable by dragging its left edge (220 px minimum; the grid keeps at least one column). Its width isn't saved yet; that comes with `ui.toml` in M5.
@@ -196,14 +202,16 @@ One window with three panes and a collapsible queue at the bottom. It uses a gpu
 - Double-click a tile opens it like "Open" (the system viewer). In-app fullscreen with ← / → is not built yet.
 - Not handled yet: the cached thumbnail isn't refreshed if an item is edited on the phone after it was cached.
 
-**Right pane: preview and info**
+**Right pane: info**
+- An "Info" header with a hide button. The library bar's toggle and `I` show or hide it; hidden by the user, it stays hidden when another item is picked (before, × only closed it until the next click).
+- Order: preview, file name with type and date, then Copy / Open / Show in folder (when copied), then sections DETAILS (type, taken, resolution, file size, marks), SOURCE (app, camera, lens, exposure, albums), LOCATION and COPY (saves as, status in green, where the copy is).
 - Photos: a large preview. Double-click opens fullscreen with ← / → to step through.
 - Videos: a poster frame. "Open ▶" copies the file to a temp location and opens it in the system player with `xdg-open`, because gpui has no video widget.
 - Info: file name, type, capture date and time zone, pixel size, length, file size, edited / Live / favourite, **source app**, **camera, lens, exposure**, **place** (street address), location coordinates (no map in v1), **albums**, **what it will be saved as** (e.g. "HEIC → JPG"), and **whether it's already copied** (and where).
 - The pane is hidden until an item is selected; × closes it, and the grid then takes the full width with tiles stretched to fill each row.
 
-**Bottom: transfer queue**
-- Collapsed: one summary line with done / total, bytes, failed count and time left.
+**Bottom: transfer dock**
+- Collapsed: one line with a status icon (spinner, paused, warning or green tick), a headline ("Copying 3 of 40", "All 40 done", "38 done · 2 failed"), an inline progress bar with size and time left, and the file being copied. The controls sit at the right end; Export error report and Open folder are icon buttons.
 - Expanded: a list with a status icon per item and the local time it finished. Failed rows show the reason, plus "Retry" and "Retry all failed". The header also has Pause/Resume, Clear finished, Export error report (CSV) and Open folder.
 - Each item moves through: Queued → Reading → Converting → Verifying → Done / Failed / Skipped / Overwritten.
 
@@ -415,6 +423,11 @@ The device, library, convert and queue crates have no UI dependency, so they can
 - Keyboard shortcuts list in the app (☰ menu).
 - In-app fullscreen viewer with ← / →.
 - Refresh cached thumbnails for items edited on the phone after caching.
+
+**Done after 0.5.0** (2026-11-18)
+- New app icon (light squircle); the tray keeps its own glyph.
+- UI redesign in six stages (§6): palette in one file, sidebar sections, toolbar and library bar, grid
+  badges and selection, info pane, transfer dock. Sort by name, size and type.
 
 **Done after 0.4.0** (2026-11-14, for 0.5.0)
 - Search (Ctrl+F) over name, place, albums, source app and camera; zoomable grid (80–300 px,
