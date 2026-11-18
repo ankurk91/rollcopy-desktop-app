@@ -91,6 +91,9 @@ async fn read_from_db(
     fs: &mut MediaFs,
     dir: &Path,
 ) -> Result<Result<Vec<Asset>, String>, DeviceError> {
+    // Also when the load is cancelled (its task dropped at an await), so
+    // the copy never outlives the load (audit SEC-02; review R5).
+    let _cleanup = RemoveDbOnDrop(dir);
     let mut last = String::new();
     for _ in 0..2 {
         let path = match fetch_photos_db(fs, dir).await {
@@ -222,6 +225,15 @@ pub async fn scan_dcim(fs: &mut MediaFs) -> Result<Vec<Asset>, DeviceError> {
 /// Deletes the local database copy. It holds the phone's whole library
 /// history (places, people, captions), so it isn't kept once read
 /// (audit SEC-02).
+/// Deletes the database copy in its folder when dropped.
+struct RemoveDbOnDrop<'a>(&'a Path);
+
+impl Drop for RemoveDbOnDrop<'_> {
+    fn drop(&mut self) {
+        remove_photos_db(self.0);
+    }
+}
+
 pub fn remove_photos_db(dir: &Path) {
     for name in LOCAL_FILES {
         let _ = std::fs::remove_file(dir.join(name));
@@ -263,6 +275,20 @@ pub async fn load(session: &Session, cache_dir: &Path) -> Result<Library, Device
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review R5: dropping the guard (as when a load is cancelled) deletes
+    /// the database copy and its folder.
+    #[test]
+    fn cancelled_load_leaves_no_database_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("db/u");
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in ["Photos.sqlite", "Photos.sqlite-wal", "Photos.sqlite.part"] {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        drop(super::RemoveDbOnDrop(&dir));
+        assert!(!dir.exists());
+    }
 
     #[test]
     fn database_copy_is_removed() {
