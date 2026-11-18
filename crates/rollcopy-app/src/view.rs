@@ -1,9 +1,11 @@
 //! Main window (PLAN §6): the `MainView` state, its layout and keyboard
 //! handling. The parts live in their own files:
 //!
-//! - `toolbar.rs`, `sidebar.rs` (device card, library tree), `guide.rs`
-//!   (connection guide), `grid.rs` / `list.rs` (centre pane),
-//!   `preview.rs`, `viewer.rs`, `transfers.rs` (bottom panel)
+//! - `toolbar.rs`, `sidebar.rs` (library tree, the phone), `guide.rs`
+//!   (connection guide), `library_bar.rs` (bar above the grid),
+//!   `grid.rs` / `list.rs` (centre pane), `preview.rs` (info pane),
+//!   `viewer.rs`, `transfers/` (copying: actions, dock, dialogs,
+//!   toolbar pieces, state)
 //! - `events.rs` (worker, queue and tray events), `filters.rs` (chips and
 //!   the visible items), `lifecycle.rs` (close and quit), `widgets.rs`
 

@@ -10,6 +10,7 @@ mod grid;
 mod guide;
 mod icons;
 mod instance;
+mod library_bar;
 mod lifecycle;
 mod list;
 mod log;
