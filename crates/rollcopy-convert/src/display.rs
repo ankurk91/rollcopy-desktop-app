@@ -48,9 +48,11 @@ pub fn display_jpeg(src: &Path, dst: &Path, max_side: u32) -> Result<(u32, u32),
             .with_guessed_format()?
             .into_decoder()
             .map_err(|e| ConvertError::Decode(e.to_string()))?;
+        // A bad orientation value already reads as "none"; an unreadable
+        // EXIF block shouldn't stop the photo from showing either.
         let orientation = decoder
             .orientation()
-            .map_err(|e| ConvertError::Decode(e.to_string()))?;
+            .unwrap_or(image::metadata::Orientation::NoTransforms);
         let icc = decoder.icc_profile().ok().flatten();
         let mut img =
             DynamicImage::from_decoder(decoder).map_err(|e| ConvertError::Decode(e.to_string()))?;
