@@ -22,6 +22,10 @@ pub struct History {
     conn: Connection,
 }
 
+/// Failures kept; older ones are deleted when the history is opened
+/// (review R2). Plenty for a bug report, and a few MB at most.
+const KEEP: i64 = 5_000;
+
 impl History {
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         if let Some(dir) = path.parent() {
@@ -40,7 +44,18 @@ impl History {
                 retries INTEGER NOT NULL
             );",
         )?;
-        Ok(Self { conn })
+        let h = Self { conn };
+        h.prune(KEEP)?;
+        Ok(h)
+    }
+
+    /// Keeps only the newest `keep` failures.
+    fn prune(&self, keep: i64) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "DELETE FROM failures WHERE id <= (SELECT MAX(id) - ?1 FROM failures)",
+            [keep],
+        )?;
+        Ok(())
     }
 
     pub fn record(&self, r: &FailureRecord) -> rusqlite::Result<()> {
@@ -130,5 +145,38 @@ mod tests {
         assert_eq!(h.export_csv(&out).unwrap(), 1);
         let text = std::fs::read_to_string(out).unwrap();
         assert!(text.contains("\"bad \"\"data\"\", truncated\""));
+    }
+
+    #[test]
+    fn keeps_only_the_newest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.sqlite");
+        let h = History::open(&path).unwrap();
+        let r = |n: u32| FailureRecord {
+            time: format!("2026-11-12T15:00:{n:02}+05:30"),
+            udid: "U1".into(),
+            source: format!("/DCIM/100APPLE/IMG_{n:04}.HEIC"),
+            dest: "/d".into(),
+            stage: "read".into(),
+            error: "x".into(),
+            retries: 0,
+        };
+        for n in 1..=5 {
+            h.record(&r(n)).unwrap();
+        }
+        h.prune(3).unwrap();
+        let left: Vec<_> = h
+            .failures(10)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.source)
+            .collect();
+        assert_eq!(
+            left,
+            [5, 4, 3].map(|n| format!("/DCIM/100APPLE/IMG_{n:04}.HEIC"))
+        );
+        // Opening again prunes to KEEP, which leaves these alone.
+        drop(h);
+        assert_eq!(History::open(&path).unwrap().failures(10).unwrap().len(), 3);
     }
 }
