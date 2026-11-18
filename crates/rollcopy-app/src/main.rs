@@ -187,8 +187,15 @@ fn main() {
             cx.open_url(&report::DebugInfo::collect(None).issue_url())
         });
         cx.on_action(|_: &view::Quit, cx| cx.quit());
-        // Session-only files (viewer images, opened files) go at quit.
+        // At quit: stop conversions (a child ffmpeg outlives its parent),
+        // remove this session's unfinished copies, then the session-only
+        // files (viewer images, opened files). Synchronous: gpui gives the
+        // returned future only 200 ms (review C4).
         cx.on_app_quit(move |_| {
+            if !rollcopy_convert::shutdown(std::time::Duration::from_millis(500)) {
+                applog!("a conversion was still running at quit");
+            }
+            rollcopy_queue::remove_own_parts();
             paths_at_exit.tidy();
             async {}
         })

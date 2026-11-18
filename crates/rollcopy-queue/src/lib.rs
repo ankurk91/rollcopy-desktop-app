@@ -11,6 +11,7 @@ mod queue;
 mod space;
 
 pub use history::{FailureRecord, History};
+pub use job::remove_own_parts;
 pub use layout::{
     ConflictPolicy, Layout, Settings, Target, dest_path, dest_path_in, find_copy, is_copy_of,
     output_name, resolve_dest,

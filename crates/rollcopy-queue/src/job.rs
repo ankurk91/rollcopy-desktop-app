@@ -82,6 +82,39 @@ fn staging_path(dir: &Path, ext: &str) -> PathBuf {
     dir.join(format!("{}.{ext}", unique_tag()))
 }
 
+/// Folders this process has written `.part` files in.
+static PART_DIRS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+fn note_part_dir(dir: &Path) {
+    let mut dirs = PART_DIRS.lock().unwrap_or_else(|e| e.into_inner());
+    if !dirs.iter().any(|d| d == dir) {
+        dirs.push(dir.to_path_buf());
+    }
+}
+
+/// Deletes this process's unfinished `.rollcopy-<pid>-…part` files, for
+/// quitting (review C4). The process exits without running destructors,
+/// so the jobs' own clean-up never happens then. Call after
+/// `rollcopy_convert::shutdown` so no ffmpeg is still writing.
+pub fn remove_own_parts() {
+    let dirs = PART_DIRS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    remove_parts_of(&dirs, std::process::id());
+}
+
+/// Deletes `.rollcopy-<pid>-…part` files of process `pid` in `dirs`.
+fn remove_parts_of(dirs: &[PathBuf], pid: u32) {
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            if orphan_pid(&e.file_name().to_string_lossy()) == Some(pid) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+}
+
 /// Deletes `.rollcopy-<pid>-…part` files in `dir` left by a Rollcopy that
 /// crashed or was killed (audit REL-09). Files of a process that is still
 /// running are kept. Each folder is checked once per session.
@@ -150,9 +183,12 @@ pub(crate) async fn run(
 ) -> Result<bool, JobError> {
     let plan = spec.asset.save_plan();
     let ext = plan.from_ext.to_ascii_lowercase();
-    // Deleted on drop unless persisted.
-    let part =
-        TempPath::try_from_path(part_path(&spec.dest)).map_err(|e| failed(Stage::Write, e))?;
+    // Deleted on drop unless persisted; at quit by `remove_own_parts`.
+    let part_file = part_path(&spec.dest);
+    if let Some(dir) = part_file.parent() {
+        note_part_dir(dir);
+    }
+    let part = TempPath::try_from_path(part_file).map_err(|e| failed(Stage::Write, e))?;
     let staging = TempPath::try_from_path(staging_path(&spec.staging_dir, &ext))
         .map_err(|e| failed(Stage::Write, e))?;
     run_inner(spec, fs, events, part, &staging).await
@@ -399,6 +435,22 @@ async fn blocking<T: Send + 'static>(
 
 #[cfg(test)]
 mod tests {
+    /// At quit only this process's unfinished files go; another running
+    /// Rollcopy's and the user's own files stay.
+    #[test]
+    fn quitting_removes_only_own_parts() {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = dir.path().join(".rollcopy-4242-7-IMG_0001.MP4.part");
+        let other = dir.path().join(".rollcopy-4343-1-IMG_0002.MP4.part");
+        let photo = dir.path().join("IMG_0003.JPG");
+        for p in [&mine, &other, &photo] {
+            std::fs::write(p, b"x").unwrap();
+        }
+        super::remove_parts_of(&[dir.path().to_path_buf()], 4242);
+        assert!(!mine.exists());
+        assert!(other.exists() && photo.exists());
+    }
+
     use super::*;
 
     fn unsupported(part: TempPath) -> Result<(), tempfile::PathPersistError> {

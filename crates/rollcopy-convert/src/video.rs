@@ -98,6 +98,8 @@ fn run_with(
                 ConvertError::Io(e)
             }
         })?;
+    // Counted until it has exited, so `shutdown` can wait for it.
+    let running = crate::ToolRunning::start();
     // Drain both pipes on their own threads so a chatty tool can't block.
     let drain = |r: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {
@@ -135,6 +137,7 @@ fn run_with(
         }
         std::thread::sleep(Duration::from_millis(20));
     };
+    drop(running);
     let out = stdout.join().unwrap_or_default();
     let err = stderr.join().unwrap_or_default();
     if cancelled {
