@@ -12,6 +12,7 @@ use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::resizable::{HandleEdge, resize_handle};
 use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -178,6 +179,28 @@ impl Transfers {
             }
         }
         (done, failed, active, self.rows.len())
+    }
+}
+
+/// The dock's headline: "Copying 3 of 40", "Paused at 2 of 40",
+/// "All 40 done", "38 done · 2 failed". `done` counts skipped and
+/// cancelled items too: they're finished.
+pub(crate) fn headline(
+    done: usize,
+    failed: usize,
+    active: usize,
+    total: usize,
+    paused: bool,
+) -> String {
+    let finished = done + failed;
+    if active > 0 && paused {
+        format!("Paused at {finished} of {total}")
+    } else if active > 0 {
+        format!("Copying {} of {total}", (finished + 1).min(total))
+    } else if failed == 0 {
+        format!("All {total} done")
+    } else {
+        format!("{done} done · {failed} failed")
     }
 }
 
@@ -594,32 +617,72 @@ impl MainView {
         let progress = (active > 0)
             .then(|| overall(&t.rows, t.batch_start))
             .flatten();
-        let mut summary = format!("{done}/{total} done");
-        if let Some(p) = &progress {
-            summary.push_str(&format!(" · {}", p.label()));
-        }
-        if failed > 0 {
-            summary.push_str(&format!(" · {failed} failed"));
-        }
-        if let Some(r) = t.rows.iter().find(|r| {
-            matches!(
-                r.state,
-                JobState::Reading | JobState::Converting | JobState::Verifying
-            )
-        }) {
-            summary.push_str(&format!(
-                " · {} {}",
-                state_label(&r.state, r.progress),
-                r.name
-            ));
-        }
-
         let paused = t.paused.clone();
+        let current = t
+            .rows
+            .iter()
+            .find(|r| {
+                matches!(
+                    r.state,
+                    JobState::Reading | JobState::Converting | JobState::Verifying
+                )
+            })
+            .map(|r| format!("{} {}", state_label(&r.state, r.progress), r.name));
+        let status_icon = if active > 0 && paused.is_some() {
+            Icon::new(IconName::Pause)
+                .small()
+                .text_color(theme.warning)
+                .into_any_element()
+        } else if active > 0 {
+            Spinner::new().small().into_any_element()
+        } else if failed > 0 {
+            Icon::new(IconName::CircleAlert)
+                .small()
+                .text_color(theme.danger)
+                .into_any_element()
+        } else {
+            Icon::new(IconName::CheckCheck)
+                .small()
+                .text_color(theme.success)
+                .into_any_element()
+        };
+        let bar = |f: f32| {
+            div()
+                .flex_shrink_0()
+                .w(px(140.))
+                .h(px(4.))
+                .rounded_full()
+                .bg(theme.border)
+                .child(
+                    div()
+                        .h_full()
+                        .rounded_full()
+                        .w(relative(f))
+                        .bg(if paused.is_some() {
+                            theme.warning
+                        } else {
+                            theme.primary
+                        }),
+                )
+        };
+        let one_line = |text: String, color: Hsla| {
+            div()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_sm()
+                .text_color(color)
+                .child(text)
+        };
+
+        // The dock's one line: status, progress, the current file, then the
+        // controls. Clicking it shows or hides the list of files.
         let header = h_flex()
             .id("transfers-header")
             .w_full()
-            .px_4()
-            .py_1p5()
+            .h(px(34.))
+            .px_3()
             .gap_2()
             .items_center()
             .cursor_pointer()
@@ -633,91 +696,113 @@ impl MainView {
                 } else {
                     IconName::ChevronRight
                 })
-                .xsmall(),
+                .xsmall()
+                .text_color(theme.muted_foreground),
             )
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("Transfers"))
-            .child(muted(summary, &theme))
-            .when_some(paused.clone(), |d, reason| {
-                d.child(div().text_sm().text_color(theme.warning).child(reason))
-            })
-            .child(div().flex_1())
-            .when(failed > 0, |d| {
-                d.child(
-                    btn("retry-all")
-                        .xsmall()
-                        .ghost()
-                        .label("Retry all failed")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.queue_cmd(QueueCommand::RetryAllFailed);
-                            cx.stop_propagation();
-                        })),
-                )
-            })
-            .when(active > 0 || paused.is_some(), |d| {
-                let is_paused = paused.is_some();
-                d.child(
-                    btn("pause")
-                        .xsmall()
-                        .outline()
-                        .label(if is_paused { "Resume" } else { "Pause" })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.queue_cmd(if is_paused {
-                                QueueCommand::Resume
-                            } else {
-                                QueueCommand::Pause
-                            });
-                            cx.stop_propagation();
-                        })),
-                )
-            })
-            .when(active > 0, |d| {
-                d.child(
-                    btn("cancel-all")
-                        .xsmall()
-                        .ghost()
-                        .label("Cancel all")
-                        .tooltip("Stop copying; files already copied stay")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.queue_cmd(QueueCommand::CancelAll);
-                            cx.stop_propagation();
-                        })),
-                )
-            })
-            .when(done > 0, |d| {
-                d.child(
-                    btn("clear")
-                        .xsmall()
-                        .ghost()
-                        .label("Clear finished")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.queue_cmd(QueueCommand::ClearFinished);
-                            cx.stop_propagation();
-                        })),
-                )
-            })
+            .child(div().flex_shrink_0().child(status_icon))
             .child(
-                btn("export-errors")
-                    .xsmall()
-                    .ghost()
-                    .label("Export error report")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.export_errors(cx);
-                        cx.stop_propagation();
-                    })),
+                div()
+                    .flex_shrink_0()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(headline(done, failed, active, total, paused.is_some())),
             )
-            .when_some(self.dest_root(), |d, dest| {
-                d.child(
-                    btn("open-dest")
-                        .xsmall()
-                        .ghost()
-                        .icon(IconName::FolderOpen)
-                        .label("Open folder")
-                        .on_click(cx.listener(move |_, _, _, cx| {
-                            spawn_xdg_open(dest.clone());
-                            cx.stop_propagation();
-                        })),
+            .when_some(progress.as_ref(), |d, p| {
+                d.child(bar(p.fraction())).child(
+                    div()
+                        .flex_shrink_0()
+                        .child(one_line(p.label(), theme.muted_foreground)),
                 )
-            });
+            })
+            .when_some(paused.clone(), |d, reason| {
+                d.child(one_line(reason, theme.warning))
+            })
+            .when_some(current, |d, c| d.child(one_line(c, theme.muted_foreground)))
+            .child(div().flex_1())
+            .child(
+                h_flex()
+                    .flex_shrink_0()
+                    .gap_1()
+                    .items_center()
+                    .when(failed > 0, |d| {
+                        d.child(
+                            btn("retry-all")
+                                .xsmall()
+                                .ghost()
+                                .label("Retry all failed")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.queue_cmd(QueueCommand::RetryAllFailed);
+                                    cx.stop_propagation();
+                                })),
+                        )
+                    })
+                    .when(active > 0 || paused.is_some(), |d| {
+                        let is_paused = paused.is_some();
+                        d.child(
+                            btn("pause")
+                                .xsmall()
+                                .outline()
+                                .label(if is_paused { "Resume" } else { "Pause" })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.queue_cmd(if is_paused {
+                                        QueueCommand::Resume
+                                    } else {
+                                        QueueCommand::Pause
+                                    });
+                                    cx.stop_propagation();
+                                })),
+                        )
+                    })
+                    .when(active > 0, |d| {
+                        d.child(
+                            btn("cancel-all")
+                                .xsmall()
+                                .ghost()
+                                .label("Cancel all")
+                                .tooltip("Stop copying; files already copied stay")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.queue_cmd(QueueCommand::CancelAll);
+                                    cx.stop_propagation();
+                                })),
+                        )
+                    })
+                    .when(done > 0, |d| {
+                        d.child(
+                            btn("clear")
+                                .xsmall()
+                                .ghost()
+                                .label("Clear finished")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.queue_cmd(QueueCommand::ClearFinished);
+                                    cx.stop_propagation();
+                                })),
+                        )
+                    })
+                    .child(
+                        btn("export-errors")
+                            .xsmall()
+                            .ghost()
+                            .icon(IconName::FileDown)
+                            .tooltip("Export error report")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.export_errors(cx);
+                                cx.stop_propagation();
+                            })),
+                    )
+                    .when_some(self.dest_root(), |d, dest| {
+                        d.child(
+                            btn("open-dest")
+                                .xsmall()
+                                .ghost()
+                                .icon(IconName::FolderOpen)
+                                .tooltip("Open the Save-to folder")
+                                .on_click(cx.listener(move |_, _, _, cx| {
+                                    spawn_xdg_open(dest.clone());
+                                    cx.stop_propagation();
+                                })),
+                        )
+                    }),
+            );
 
         let mut panel = v_flex()
             .relative()
@@ -725,20 +810,10 @@ impl MainView {
             .flex_shrink_0()
             .border_t_1()
             .border_color(theme.border)
-            .bg(theme.sidebar)
-            // Overall progress along the panel's top edge.
-            .when_some(progress.as_ref().map(Overall::fraction), |d, f| {
-                d.child(div().w_full().h(px(3.)).bg(theme.muted).child(
-                    div().h_full().w(relative(f)).bg(if t.paused.is_some() {
-                        theme.warning
-                    } else {
-                        theme.primary
-                    }),
-                ))
-            })
+            .bg(theme.status_bar)
             .child(header);
         if let Some(note) = t.note.clone() {
-            panel = panel.child(div().px_4().pb_1().child(muted(note, &theme)));
+            panel = panel.child(div().px_3().pb_1().child(muted(note, &theme)));
         }
         if t.expanded {
             // Drag the top edge to make the panel taller or shorter.
@@ -884,7 +959,7 @@ impl MainView {
             )
             .id(("transfer", i))
             .h(px(ROW_H))
-            .rounded_md()
+            .rounded(px(crate::palette::RADIUS))
             .text_sm()
             .hover(|s| s.bg(theme.muted))
             .into_any_element()
@@ -1175,6 +1250,16 @@ mod tests {
         assert_eq!(super::left_label(Duration::from_secs(20)), "under a minute");
         assert_eq!(super::left_label(Duration::from_secs(250)), "4 min");
         assert_eq!(super::left_label(Duration::from_secs(3900)), "1 h 05 min");
+    }
+
+    #[test]
+    fn dock_headline() {
+        use super::headline;
+        assert_eq!(headline(2, 0, 38, 40, false), "Copying 3 of 40");
+        assert_eq!(headline(2, 0, 38, 40, true), "Paused at 2 of 40");
+        assert_eq!(headline(40, 0, 0, 40, false), "All 40 done");
+        assert_eq!(headline(38, 2, 0, 40, false), "38 done · 2 failed");
+        assert_eq!(headline(1, 0, 0, 1, false), "All 1 done");
     }
 
     #[test]
