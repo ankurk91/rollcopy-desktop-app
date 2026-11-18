@@ -45,7 +45,7 @@ pub fn app_dirs() -> &'static AppDirs {
                 cache: d.cache_dir().to_path_buf(),
             },
             None => {
-                let tmp = std::env::temp_dir().join("rollcopy");
+                let tmp = private_temp_dir();
                 AppDirs {
                     config: tmp.clone(),
                     state: tmp.clone(),
@@ -54,4 +54,28 @@ pub fn app_dirs() -> &'static AppDirs {
             }
         },
     )
+}
+
+/// Fallback folder with no home: `/tmp/rollcopy-<uid>`, so another user
+/// can't have made it first (a shared `/tmp/rollcopy` could be pre-created
+/// or a symlink; review S5). If it exists and isn't ours, a name for this
+/// process is used instead. It's made owner-only when first used.
+fn private_temp_dir() -> PathBuf {
+    let tmp = std::env::temp_dir();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        // Our uid: the owner of our own /proc entry.
+        let uid = std::fs::metadata("/proc/self").map(|m| m.uid()).ok();
+        if let Some(uid) = uid {
+            let dir = tmp.join(format!("rollcopy-{uid}"));
+            match std::fs::symlink_metadata(&dir) {
+                Err(_) => return dir,
+                Ok(m) if m.is_dir() && m.uid() == uid => return dir,
+                Ok(_) => {}
+            }
+            return tmp.join(format!("rollcopy-{uid}-{}", std::process::id()));
+        }
+    }
+    tmp.join(format!("rollcopy-{}", std::process::id()))
 }
