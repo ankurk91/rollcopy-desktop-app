@@ -60,7 +60,12 @@ impl DebugInfo {
             self.usbmuxd,
             self.ffmpeg,
             self.phone,
-            crate::paths::app_dirs().log().display()
+            home_relative(
+                &crate::paths::app_dirs().log(),
+                std::env::var_os("HOME")
+                    .as_deref()
+                    .map(std::path::Path::new)
+            )
         )
     }
 
@@ -116,9 +121,35 @@ fn encode(s: &str) -> String {
     out
 }
 
+/// `path` with the home folder shown as `~`, so the user name isn't in the
+/// report (review S7).
+fn home_relative(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
+    match home.and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{DebugInfo, MAX_URL, encode};
+    use super::{DebugInfo, MAX_URL, encode, home_relative};
+    use std::path::Path;
+
+    #[test]
+    fn log_path_hides_the_user_name() {
+        let log = Path::new("/home/someone/.local/state/rollcopy/rollcopy.log");
+        assert_eq!(
+            home_relative(log, Some(Path::new("/home/someone"))),
+            "~/.local/state/rollcopy/rollcopy.log"
+        );
+        assert_eq!(
+            home_relative(
+                Path::new("/var/log/x.log"),
+                Some(Path::new("/home/someone"))
+            ),
+            "/var/log/x.log"
+        );
+    }
 
     fn info() -> DebugInfo {
         DebugInfo {
