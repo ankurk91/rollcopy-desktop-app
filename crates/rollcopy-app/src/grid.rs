@@ -829,9 +829,9 @@ impl MainView {
                     .when(a.is_edited(), |d| {
                         d.child(disc(
                             ("edited", pos),
-                            IconName::SquarePen,
+                            IconName::SlidersHorizontal,
                             white(),
-                            "Edited",
+                            "Edited on the iPhone",
                         ))
                     })
                     .when(a.live_photo, |d| {
@@ -902,7 +902,7 @@ impl MainView {
             return;
         };
         self.focused = Some(idx);
-        self.preview_open = !self.info_closed;
+        self.preview_open = true;
         self.status = None;
         if clicks >= 2 {
             self.activate_focused();
@@ -951,7 +951,7 @@ impl MainView {
         };
         let idx = self.visible[pos];
         self.focused = Some(idx);
-        self.preview_open = !self.info_closed;
+        self.preview_open = true;
         self.status = None;
         if extend {
             let anchor = self.anchor.or(current).unwrap_or(pos);
@@ -999,7 +999,7 @@ fn filter_icon(f: Filter) -> IconName {
         Filter::All => IconName::LayoutGrid,
         Filter::Photos => IconName::Image,
         Filter::Videos => IconName::Video,
-        Filter::Edited => IconName::SquarePen,
+        Filter::Edited => IconName::SlidersHorizontal,
         Filter::Favorites => IconName::Heart,
         Filter::Live => IconName::CircleDot,
         Filter::Screenshots => IconName::Scan,

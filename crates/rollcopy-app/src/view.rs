@@ -222,10 +222,9 @@ pub struct MainView {
     /// Where an item's copy is in the destination (the ✓ badge), by device
     /// path; `None` if it isn't copied. Filled for on-screen tiles.
     pub(crate) in_dest: HashMap<String, Option<PathBuf>>,
-    /// Info pane shown; opens when an item is selected unless the user
-    /// closed it (`info_closed`), which lasts until it's opened again.
+    /// Info pane shown; opens when an item is clicked, the toggle or I
+    /// hides it.
     pub(crate) preview_open: bool,
-    pub(crate) info_closed: bool,
     /// "Copies are still running" prompt on window close.
     pub(crate) quit_prompt: bool,
     /// "Copy all N items?" is showing.
@@ -292,7 +291,7 @@ impl MainView {
         // Preferences changed (here or in the Preferences window): apply them.
         let search = cx.new(|cx| {
             gpui_kit::component::input::InputState::new(window, cx)
-                .placeholder("Search name, place, album, app")
+                .placeholder("Search (Ctrl+F)")
         });
         let searched = cx.subscribe_in(
             &search,
@@ -408,7 +407,6 @@ impl MainView {
             config,
             in_dest: HashMap::new(),
             preview_open: false,
-            info_closed: false,
             quit_prompt: false,
             copy_all_prompt: false,
             about_open: false,

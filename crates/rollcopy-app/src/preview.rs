@@ -66,11 +66,9 @@ impl MainView {
             )
     }
 
-    /// Opens or closes the info pane. Closed by the user, it stays closed
-    /// when another item is picked, until opened again.
+    /// Opens or closes the info pane. Clicking an item opens it again.
     pub(crate) fn set_info_open(&mut self, open: bool) {
         self.preview_open = open;
-        self.info_closed = !open;
     }
 
     fn render_preview_body(&self, cx: &mut Context<Self>) -> impl IntoElement {

@@ -170,7 +170,7 @@ system light/dark setting unless one is picked.
 ```
 
 **Toolbar**
-- Left: ☰ app menu, **Copy selected (n)** and **Copy new (n)**. Middle: the **Save to** folder as a field. Right: search (Ctrl+F), Reload, Preferences, theme, GitHub. The phone's name is in the sidebar, not here.
+- Left: ☰ app menu, **Copy selected (n)** and **Copy new (n)**. Middle: the **Save to** folder as a field. Right: search (Ctrl+F; the box only says that, longer hints were cut off), Reload, Preferences, theme, GitHub. The phone's name is in the sidebar, not here.
 - **Save to**: shows the destination folder for the selected device. 📁 opens a folder picker. The default is `~/Pictures/Rollcopy/<device name>/`, and the choice is remembered (§8a).
 - **☰ app menu**:
   - Preferences… (Ctrl+,)
@@ -181,8 +181,8 @@ system light/dark setting unless one is picked.
   - Quit (Ctrl+Q)
 
 **Left pane: sidebar**
-- Sections: LIBRARY (All Media), DEVICE (the phone, then its years and months, then Undated), ALBUMS (click the heading to open or close), COLLECTIONS (Hidden, Recently Deleted). Rows are 26 px; the selected one has a purple tint and an accent icon.
-- Device block with name and battery, model and iOS on one line, a thin storage bar with space free. "Details" opens the serial number, UDID and iCloud Backup hint.
+- Sections: LIBRARY (All Media), YEARS (years and months, then Undated), ALBUMS (click the heading to open or close), COLLECTIONS (Hidden, Recently Deleted). Rows are 26 px; the selected one has a purple tint and an accent icon.
+- The phone is pinned at the bottom, below a line: name and battery, model and iOS on one line, a thin storage bar with space free. "Details" opens the serial number, UDID and iCloud Backup hint.
 - The library tree is grouped **year → month** by capture date. An "On-phone folders" view (`100APPLE`, …) is available as an advanced toggle.
 - Recently Deleted is listed with its count but greyed out, and excluded from "copy folder". It's off by default (Preferences → Library).
 - **Hidden album** (audit SEC-01, 2026-11-13): iOS locks it behind Face ID or the passcode, so its items are left out of the tree, the grid, the counts and every copy action, and their cached thumbnails are deleted. Preferences → Library → *Show Hidden album* lists them under their own **Hidden** node, never inside All media, so "Copy all" never includes them.
@@ -193,7 +193,7 @@ system light/dark setting unless one is picked.
 - Filter toggles: All / Photos / Videos / Edited / Favourites / Live / Screenshots / Selfies, plus Copied / Not copied (click the active one again to turn it off). They combine with the sidebar selection (Videos in one month). Copied state comes from the destination folder, as for the badges.
 - Sort (menu): Date taken (default, newest first), Name, Size or Type (file extension), each either way. Items without the value go last; ties go newest first. Month headings only appear in date order.
 - Place and Location in the info panel have copy-to-clipboard buttons.
-- Thumbnails are square, 160 px by default. Marks on each tile are small dark discs or pills: video icon with duration (bottom left), Edited and Live (top right, with tooltips), and a green double tick for items already in the current destination folder (bottom right). Selection is an accent outline with an accent ✓ (top left).
+- Thumbnails are square, 160 px by default. Marks on each tile are small dark discs or pills: video icon with duration (bottom left), Edited (a sliders icon: a pencil looked like an edit button) and Live (top right, with tooltips), and a green double tick for items already in the current destination folder (bottom right). Selection is an accent outline with an accent ✓ (top left).
 - Selection: click, Ctrl+click, Shift+click, Ctrl+A, Esc to clear.
 - Keyboard (added in M3 at the user's request): ← → ↑ ↓ move the focused item and update the preview, Shift+arrows extend the selection, Space / Enter open the item.
 - The preview pane is resizable by dragging its left edge (220 px minimum; the grid keeps at least one column). Its width isn't saved yet; that comes with `ui.toml` in M5.
@@ -203,7 +203,7 @@ system light/dark setting unless one is picked.
 - Not handled yet: the cached thumbnail isn't refreshed if an item is edited on the phone after it was cached.
 
 **Right pane: info**
-- An "Info" header with a hide button. The library bar's toggle and `I` show or hide it; hidden by the user, it stays hidden when another item is picked (before, × only closed it until the next click).
+- An "Info" header with a hide button. The library bar's toggle and `I` show or hide it; clicking an item opens it again.
 - Order: preview, file name with type and date, then Copy / Open / Show in folder (when copied), then sections DETAILS (type, taken, resolution, file size, marks), SOURCE (app, camera, lens, exposure, albums), LOCATION and COPY (saves as, status in green, where the copy is).
 - Photos: a large preview. Double-click opens fullscreen with ← / → to step through.
 - Videos: a poster frame. "Open ▶" copies the file to a temp location and opens it in the system player with `xdg-open`, because gpui has no video widget.

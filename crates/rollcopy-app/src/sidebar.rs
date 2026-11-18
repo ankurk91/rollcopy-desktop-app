@@ -1,5 +1,6 @@
-//! Left pane, in sections: Library (All Media), Device (the phone, then its
-//! years and months), Albums, and Collections (Hidden, Recently Deleted).
+//! Left pane, in sections: Library (All Media), Years (and their months),
+//! Albums, and Collections (Hidden, Recently Deleted), with the phone
+//! pinned at the bottom.
 //! Compact rows with a tinted selection; thin headings, no cards.
 
 use gpui_kit::assets::IconName;
@@ -59,43 +60,57 @@ impl MainView {
             ));
         }
 
-        pane = pane.child(heading("DEVICE", &theme));
-        pane = match &self.phase {
-            Phase::Ready { info } => pane.child(self.render_device_card(info, cx)),
-            Phase::NoDevice { .. } | Phase::UsbmuxdMissing => pane.child(
-                h_flex()
-                    .h(px(ROW_H))
-                    .px_2()
-                    .gap_2()
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
-                    .child(Icon::new(IconName::Smartphone).small())
-                    .child("No iPhone connected"),
-            ),
-            _ => pane.child(
-                h_flex()
-                    .h(px(ROW_H))
-                    .px_2()
-                    .gap_2()
-                    .text_sm()
-                    .child(Spinner::new().small())
-                    .child("Connecting…"),
-            ),
-        };
-
         if let Some(tree) = tree {
             pane = self.render_tree(pane, tree, cx);
         }
+
+        // The phone sits at the bottom, below a line, whatever the list's
+        // length.
+        let device = match &self.phase {
+            Phase::Ready { info } => self.render_device_card(info, cx).into_any_element(),
+            Phase::NoDevice { .. } | Phase::UsbmuxdMissing => h_flex()
+                .h(px(ROW_H))
+                .px_2()
+                .gap_2()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child(Icon::new(IconName::Smartphone).small())
+                .child("No iPhone connected")
+                .into_any_element(),
+            _ => h_flex()
+                .h(px(ROW_H))
+                .px_2()
+                .gap_2()
+                .text_sm()
+                .child(Spinner::new().small())
+                .child("Connecting…")
+                .into_any_element(),
+        };
+
         v_flex()
-            .id("left-pane")
             .w(px(LEFT_W))
             .h_full()
             .flex_shrink_0()
-            .overflow_y_scrollbar()
             .bg(theme.sidebar)
             .border_r_1()
             .border_color(theme.border)
-            .child(pane)
+            .child(
+                div()
+                    .id("left-pane")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .child(pane),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .px_2()
+                    .py_2()
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .child(device),
+            )
     }
 
     /// The phone: name and battery, model and iOS, a storage bar, and
@@ -229,7 +244,7 @@ impl MainView {
         card
     }
 
-    /// The phone's years and months, then the Albums and Collections
+    /// The years and months, then the Albums and Collections
     /// sections, added to `pane`.
     pub(crate) fn render_tree(
         &self,
@@ -238,6 +253,9 @@ impl MainView {
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = cx.theme().clone();
+        if !tree.years.is_empty() || tree.undated > 0 {
+            pane = pane.child(heading("YEARS", &theme));
+        }
         for y in &tree.years {
             let open = self.expanded.contains(&y.year);
             pane = pane.child(self.tree_row(
