@@ -19,6 +19,36 @@ pub fn available(path: &Path) -> Option<u64> {
     }
 }
 
+/// Whether file times on the disk holding `path` read back exactly as set:
+/// true for the usual Linux filesystems. FAT and exFAT store local time
+/// (shifted after a time-zone or DST change), and FUSE and network shares
+/// may sit on anything, so they count as not exact (review C8).
+pub fn precise_times(path: &Path) -> bool {
+    let Some(existing) = path.ancestors().find(|p| p.exists()) else {
+        return false;
+    };
+    #[cfg(target_os = "linux")]
+    {
+        // ext2/3/4, btrfs, xfs, tmpfs, zfs, f2fs, bcachefs.
+        const PRECISE: [u64; 7] = [
+            0xEF53,
+            0x9123_683E,
+            0x5846_5342,
+            0x0102_1994,
+            0x2FC1_2FC1,
+            0xF2F5_2010,
+            0xCA45_1A4E,
+        ];
+        rustix::fs::statfs(existing)
+            .is_ok_and(|st| PRECISE.contains(&(st.f_type as u64 & 0xFFFF_FFFF)))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = existing;
+        false
+    }
+}
+
 /// The disk (device id) holding `path`, or its nearest existing parent.
 pub fn device(path: &Path) -> Option<u64> {
     let existing = path.ancestors().find(|p| p.exists())?;
@@ -54,6 +84,15 @@ mod tests {
         let deep = dir.path().join("2026/11/images/IMG_0001.JPG");
         let free = available(&deep).unwrap();
         assert!(free > 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn tmpfs_and_ext4_times_are_exact() {
+        // /dev/shm is tmpfs on every Linux this runs on.
+        assert!(precise_times(Path::new("/dev/shm/rollcopy-test/x")));
+        // procfs isn't in the list.
+        assert!(!precise_times(Path::new("/proc/self")));
     }
 
     #[test]

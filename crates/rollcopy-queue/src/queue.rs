@@ -870,9 +870,13 @@ impl<O: Opener> Manager<O> {
                 .filter(|p| {
                     jobs.get(p).is_some_and(|j| {
                         !j.overwrite
-                            && std::fs::metadata(&j.dest)
-                                .and_then(|m| m.modified())
-                                .is_ok_and(|t| crate::layout::is_copy_of(t, &j.asset))
+                            && std::fs::metadata(&j.dest).is_ok_and(|m| {
+                                crate::layout::holds_copy(
+                                    &m,
+                                    &j.asset,
+                                    crate::space::precise_times(&j.dest),
+                                )
+                            })
                     })
                 })
                 .copied()

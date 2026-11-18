@@ -116,6 +116,39 @@ pub fn is_copy_of(modified: SystemTime, a: &Asset) -> bool {
     off <= 2.0 || off >= 898.0
 }
 
+/// Whether a file with this modified time and size is Rollcopy's copy of
+/// `a`. With `precise_times` (see `space::precise_times`) the time must
+/// match within 2 s; otherwise the FAT slack of [`is_copy_of`] applies.
+/// That slack applied everywhere once, so with Overwrite on ext4 a
+/// different photo of the same name taken a whole number of quarter hours
+/// apart was taken for the copy and replaced (review C8). A byte-for-byte
+/// copy must also have the original's size.
+pub(crate) fn copy_matches(modified: SystemTime, len: u64, a: &Asset, precise_times: bool) -> bool {
+    let time_ok = match a.captured {
+        None => true,
+        Some(c) if precise_times => {
+            let c = SystemTime::from(c);
+            let diff = modified.duration_since(c).unwrap_or_else(|e| e.duration());
+            diff <= Duration::from_secs(2)
+        }
+        Some(_) => is_copy_of(modified, a),
+    };
+    if !time_ok {
+        return false;
+    }
+    let plan = a.save_plan();
+    match a.original_size {
+        Some(size) if !plan.converts() && !plan.uses_edited => len == size,
+        _ => true,
+    }
+}
+
+/// [`copy_matches`] for a file on disk.
+pub(crate) fn holds_copy(m: &std::fs::Metadata, a: &Asset, precise_times: bool) -> bool {
+    m.modified()
+        .is_ok_and(|t| copy_matches(t, m.len(), a, precise_times))
+}
+
 /// Where an asset's copy goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
@@ -151,6 +184,7 @@ pub fn resolve_dest(
     taken: impl Fn(&Path) -> bool,
 ) -> std::io::Result<Target> {
     let base = dest_path(settings, a);
+    let precise = crate::space::precise_times(&base);
     for n in 1..=MAX_CANDIDATES {
         let path = candidate(&base, n);
         if taken(&path) {
@@ -158,7 +192,7 @@ pub fn resolve_dest(
         }
         match std::fs::metadata(&path) {
             Ok(m) => {
-                if m.modified().is_ok_and(|t| is_copy_of(t, a)) {
+                if holds_copy(&m, a, precise) {
                     return Ok(Target::Copied(path));
                 }
             }
@@ -266,6 +300,26 @@ mod tests {
         let s = Settings::new(dir.path().to_path_buf());
         let err = resolve_dest(&s, &a, |_| true).unwrap_err();
         assert!(err.to_string().contains("no free file name"), "{err}");
+    }
+
+    /// On ext4 and the like only an exact time (±2 s) counts; elsewhere
+    /// the FAT slack stays. Straight copies must also match in size.
+    #[test]
+    fn exact_times_where_the_disk_keeps_them() {
+        let mut a = dated("DCIM/100APPLE", "IMG_0057.JPG", 1_700_000_000);
+        a.original_size = Some(1000);
+        let t = SystemTime::from(a.captured.unwrap());
+        let hour = Duration::from_secs(3600);
+        assert!(copy_matches(t, 1000, &a, true));
+        assert!(copy_matches(t + Duration::from_secs(2), 1000, &a, true));
+        assert!(!copy_matches(t + hour, 1000, &a, true));
+        assert!(copy_matches(t + hour, 1000, &a, false));
+        // Same time, different size: another file.
+        assert!(!copy_matches(t, 999, &a, true));
+        // Converted (HEIC → JPG): sizes differ by nature; time decides.
+        let mut heic = dated("DCIM/100APPLE", "IMG_0058.HEIC", 1_700_000_000);
+        heic.original_size = Some(1000);
+        assert!(copy_matches(t, 640, &heic, true));
     }
 
     #[test]
