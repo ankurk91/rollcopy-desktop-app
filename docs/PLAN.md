@@ -336,8 +336,8 @@ A small modal opened from ☰ → About Rollcopy:
 
 ## 9. Icon
 
-- Since 0.1.1: a film roll unrolling into a download arrow, purple squircle (`packaging/icons/io.github.ankurk91.Rollcopy.svg`). It was designed as a raster image for the project and redrawn as a clean SVG, because the raster had no real transparency. Before 0.1.1 it was a Tabler `device-mobile-down` placeholder.
-- The same SVG is used by the `.desktop` file and notifications, and is rasterised at runtime with `resvg` for the tray (22/32/48 px, plus a green/blue/red status dot). No build-time PNGs needed.
+- Since 0.6.0: a purple film roll whose strip unrolls into a download arrow, on a light cream-to-lavender rounded square (`packaging/icons/io.github.ankurk91.Rollcopy.svg`), traced from new raster artwork. The tray keeps its own flat glyph (`tray.svg`). From 0.1.1 to 0.5.0: the same idea on a dark purple squircle. It was designed as a raster image for the project and redrawn as a clean SVG, because the raster had no real transparency. Before 0.1.1 it was a Tabler `device-mobile-down` placeholder.
+- The app icon SVG is used by the `.desktop` file, notifications and the About dialog. The tray draws `tray.svg` at runtime with `resvg` (22/32/48 px, plus a green/blue/red status dot). No build-time PNGs needed.
 
 ## 10. Repo layout (planned)
 

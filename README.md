@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="packaging/icons/io.github.ankurk91.Rollcopy.svg" width="128" height="128" alt="Rollcopy logo: a film roll unrolling into a download arrow">
+</p>
+
 # Rollcopy: copy iPhone photos and videos to Linux
 
 [![CI](https://github.com/ankurk91/rollcopy-desktop-app/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ankurk91/rollcopy-desktop-app/actions/workflows/ci.yml)
