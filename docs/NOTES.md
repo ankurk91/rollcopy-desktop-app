@@ -146,6 +146,11 @@ it like this" details. Keep both up to date. No personal data here (see [AGENTS.
   provenance, creates a **draft**). The draft is published by hand; "Check for updates" only sees
   published releases. Bump the version in Cargo.toml, README install commands and the AppStream
   metainfo `<releases>`.
+- Before each release, check for libheif security fixes (github.com/strukturag/libheif releases and
+  CVEs). It is bundled (`embedded-libheif`, statically linked), so Ubuntu's security updates don't reach
+  it, and Dependabot skips libheif-rs on purpose. It decodes HEICs other people sent (WhatsApp,
+  AirDrop). If there's a fix, bump libheif-rs and its `v1_xx` feature (review S1). ffmpeg and libde265
+  come from the system and get distro updates.
 - AppImage: appimagetool only reads `*.appdata.xml`, so the metainfo is copied under that name.
 - Checking release status: `gh api repos/<owner>/<repo>/releases/tags/<tag>` (a drafts-blind login can
   miss drafts in the list).
