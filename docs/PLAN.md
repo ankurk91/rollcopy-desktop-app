@@ -391,7 +391,7 @@ The device, library, convert and queue crates have no UI dependency, so they can
 
 ## 13. System setup
 
-- Rust: **installed 2026-11-12** via rustup (stable 1.99.1, in `~/.cargo` and `~/.rustup`; rustup added `. "$HOME/.cargo/env"` to `~/.bashrc` and `~/.profile`).
+- Rust: **installed 2026-11-12** via rustup (then stable 1.99.1; updated to 1.100.0 by 2026-11-18), in `~/.cargo` and `~/.rustup`; rustup added `. "$HOME/.cargo/env"` to `~/.bashrc` and `~/.profile`. Builds and CI use the current stable (`dtolnay/rust-toolchain@stable`); `rust-version` in `Cargo.toml` is only the minimum (1.92, for `oo7`) and is left there on purpose.
 - Already present: build-essential, pkg-config, libssl-dev, libxkbcommon-dev, libwayland-dev, libxcb1-dev, libfontconfig-dev, libfreetype-dev, libzstd-dev, libdbus-1-dev, Vulkan (Intel Arc), usbmuxd, ffmpeg.
 - Installed for M0 (confirmed 2026-11-12): clang, cmake, libxkbcommon-x11-dev, libx11-xcb-dev, libheif-dev.
 - Needed from M4: `libde265-dev` (already present) and **`libnuma-dev`** (`sudo apt install libnuma-dev`). The bundled libheif links x265, and x265's static link needs `-lnuma`.
