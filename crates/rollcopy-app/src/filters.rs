@@ -152,9 +152,8 @@ impl MainView {
             })
             .map(|(i, _)| i)
             .collect();
-        // By date taken; undated items last either way.
         let assets = self.assets();
-        sort_by_date(assets, &mut visible, self.newest_first);
+        sort_items(assets, &mut visible, self.sort);
         self.visible = visible;
         self.selected.clear();
         self.anchor = None;
@@ -209,31 +208,126 @@ impl Query {
     }
 }
 
-/// Orders item indices by date taken (newest or oldest first), then by
-/// file name; undated items go last either way.
-pub(crate) fn sort_by_date(
-    assets: &[rollcopy_library::Asset],
-    items: &mut [usize],
-    newest_first: bool,
-) {
+/// What the grid is sorted by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum SortKey {
+    /// Date taken (the only order with month headings).
+    #[default]
+    Date,
+    Name,
+    /// File size on the phone.
+    Size,
+    /// File type: the extension (HEIC, JPG, MOV, PNG, …).
+    Type,
+}
+
+impl SortKey {
+    pub(crate) const ALL: [SortKey; 4] =
+        [SortKey::Date, SortKey::Name, SortKey::Size, SortKey::Type];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            SortKey::Date => "Date taken",
+            SortKey::Name => "Name",
+            SortKey::Size => "Size",
+            SortKey::Type => "Type",
+        }
+    }
+}
+
+/// A sort key and direction. The default is newest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Sort {
+    pub(crate) key: SortKey,
+    pub(crate) descending: bool,
+}
+
+impl Default for Sort {
+    fn default() -> Self {
+        Sort {
+            key: SortKey::Date,
+            descending: true,
+        }
+    }
+}
+
+impl Sort {
+    /// The two directions in words, (descending, ascending).
+    pub(crate) fn direction_labels(self) -> (&'static str, &'static str) {
+        match self.key {
+            SortKey::Date => ("Newest first", "Oldest first"),
+            SortKey::Name | SortKey::Type => ("Z to A", "A to Z"),
+            SortKey::Size => ("Largest first", "Smallest first"),
+        }
+    }
+
+    /// The direction in words ("Newest first", "A to Z").
+    pub(crate) fn direction(self) -> &'static str {
+        let (desc, asc) = self.direction_labels();
+        if self.descending { desc } else { asc }
+    }
+
+    /// Short label for the sort button: the direction for dates, the key
+    /// otherwise (the button's arrow shows which way).
+    pub(crate) fn label(self) -> &'static str {
+        match self.key {
+            SortKey::Date => self.direction(),
+            k => k.label(),
+        }
+    }
+
+    /// Month headings only make sense when items are in date order.
+    pub(crate) fn groups_by_month(self) -> bool {
+        self.key == SortKey::Date
+    }
+}
+
+/// Upper-case extension of a file name ("HEIC"), empty if none.
+fn file_type(name: &str) -> String {
+    name.rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_uppercase())
+        .unwrap_or_default()
+}
+
+/// Orders item indices by `sort`. Items without the value sorted on
+/// (undated, unknown size) go last either way; ties go newest first, then
+/// by file name.
+pub(crate) fn sort_items(assets: &[rollcopy_library::Asset], items: &mut [usize], sort: Sort) {
     use std::cmp::Ordering;
-    items.sort_by(|&i, &j| {
-        let (a, b) = (&assets[i], &assets[j]);
-        let by_date = match (a.captured, b.captured) {
-            (Some(x), Some(y)) if newest_first => y.cmp(&x),
+    // Present values first, then compare them in the chosen direction.
+    fn opt<T: Ord>(a: Option<T>, b: Option<T>, descending: bool) -> Ordering {
+        match (a, b) {
+            (Some(x), Some(y)) if descending => y.cmp(&x),
             (Some(x), Some(y)) => x.cmp(&y),
             (Some(_), None) => Ordering::Less,
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
+        }
+    }
+    items.sort_by(|&i, &j| {
+        let (a, b) = (&assets[i], &assets[j]);
+        let primary = match sort.key {
+            SortKey::Date => opt(a.captured, b.captured, sort.descending),
+            SortKey::Size => opt(a.original_size, b.original_size, sort.descending),
+            SortKey::Name => {
+                let o = a.filename.to_lowercase().cmp(&b.filename.to_lowercase());
+                if sort.descending { o.reverse() } else { o }
+            }
+            SortKey::Type => {
+                let o = file_type(&a.filename).cmp(&file_type(&b.filename));
+                if sort.descending { o.reverse() } else { o }
+            }
         };
-        by_date.then_with(|| a.filename.cmp(&b.filename))
+        primary
+            .then_with(|| opt(a.captured, b.captured, true))
+            .then_with(|| a.filename.cmp(&b.filename))
     });
 }
 
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` macro.
-    use super::{Filter, Query, SyncFilter, sort_by_date};
+    use super::{Filter, Query, Sort, SortKey, SyncFilter, sort_items};
     use chrono::{TimeZone, Utc};
     use rollcopy_library::{Asset, MediaKind};
 
@@ -272,6 +366,10 @@ mod tests {
         assert!(Query::new("   ").is_empty());
     }
 
+    fn sort(key: SortKey, descending: bool) -> Sort {
+        Sort { key, descending }
+    }
+
     #[test]
     fn sorted_by_date_with_undated_last() {
         let assets = vec![
@@ -281,9 +379,52 @@ mod tests {
             item("IMG_0004.JPG", MediaKind::Photo, Some(200)),
         ];
         let mut items = vec![0, 1, 2, 3];
-        sort_by_date(&assets, &mut items, true);
+        sort_items(&assets, &mut items, Sort::default());
         assert_eq!(items, vec![2, 3, 1, 0]);
-        sort_by_date(&assets, &mut items, false);
+        sort_items(&assets, &mut items, sort(SortKey::Date, false));
         assert_eq!(items, vec![1, 2, 3, 0]);
+    }
+
+    #[test]
+    fn sorted_by_size_with_unknown_last() {
+        let mut assets = vec![
+            item("IMG_0001.JPG", MediaKind::Photo, Some(100)),
+            item("IMG_0002.JPG", MediaKind::Photo, Some(200)),
+            item("IMG_0003.JPG", MediaKind::Photo, Some(300)),
+            item("IMG_0004.JPG", MediaKind::Photo, Some(400)),
+        ];
+        assets[0].original_size = Some(5_000);
+        assets[1].original_size = Some(9_000);
+        assets[3].original_size = Some(5_000);
+        let mut items = vec![0, 1, 2, 3];
+        sort_items(&assets, &mut items, sort(SortKey::Size, true));
+        // Equal sizes: newer first.
+        assert_eq!(items, vec![1, 3, 0, 2]);
+        sort_items(&assets, &mut items, sort(SortKey::Size, false));
+        assert_eq!(items, vec![3, 0, 1, 2]);
+    }
+
+    #[test]
+    fn sorted_by_type_then_newest() {
+        let assets = vec![
+            item("IMG_0001.MOV", MediaKind::Video, Some(100)),
+            item("IMG_0002.heic", MediaKind::Photo, Some(200)),
+            item("IMG_0003.JPG", MediaKind::Photo, Some(300)),
+            item("IMG_0004.HEIC", MediaKind::Photo, Some(400)),
+        ];
+        let mut items = vec![0, 1, 2, 3];
+        sort_items(&assets, &mut items, sort(SortKey::Type, false));
+        assert_eq!(items, vec![3, 1, 2, 0]);
+        sort_items(&assets, &mut items, sort(SortKey::Name, true));
+        assert_eq!(items, vec![3, 2, 1, 0]);
+    }
+
+    #[test]
+    fn only_date_order_has_month_headings() {
+        assert!(Sort::default().groups_by_month());
+        assert!(!sort(SortKey::Name, false).groups_by_month());
+        assert_eq!(Sort::default().label(), "Newest first");
+        assert_eq!(sort(SortKey::Size, false).label(), "Size");
+        assert_eq!(sort(SortKey::Size, false).direction(), "Smallest first");
     }
 }

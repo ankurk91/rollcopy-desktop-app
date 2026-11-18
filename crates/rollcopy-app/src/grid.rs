@@ -7,12 +7,16 @@ use std::ops::Range;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::button::ButtonVariants as _;
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rollcopy_library::{MediaKind, Source};
 
+use crate::filters::{Sort, SortKey};
 use crate::tree::{Selection, month_name};
 use crate::view::{Filter, LEFT_W, LibState, MainView, SyncFilter, Thumb, btn, muted};
 use crate::worker::{Command, ThumbReq, phone_thumb_path};
@@ -226,7 +230,7 @@ impl MainView {
         let count = |f: Filter| counts[f.count_index()];
 
         let title = match self.selection {
-            Selection::All => "All media".to_owned(),
+            Selection::All => "All Media".to_owned(),
             Selection::Year(y) => y.to_string(),
             Selection::Month(y, m) => format!("{} {y}", month_name(m)),
             Selection::Undated => "Undated".to_owned(),
@@ -241,7 +245,8 @@ impl MainView {
                 _ => String::new(),
             },
         };
-        let mut summary = format!("{} items", self.visible.len());
+        let n = self.visible.len();
+        let mut summary = format!("{n} item{}", if n == 1 { "" } else { "s" });
         if !self.selected.is_empty() {
             summary.push_str(&format!(" · {} selected", self.selected.len()));
         }
@@ -251,16 +256,17 @@ impl MainView {
             summary.push_str(&format!(" · from DCIM folder ({reason})"));
         }
 
-        // Type filters: an icon and a count, named in the tooltip. Empty
-        // ones are left out (unless selected) to keep the row short.
+        // Type filters: a row of toggles with an icon and a count, named in
+        // the tooltip. Empty ones are left out (unless on) to keep it short.
         let chips: Vec<AnyElement> = Filter::ALL
             .iter()
             .filter(|&&f| f == Filter::All || f == self.filter || count(f) > 0)
             .map(|&f| {
-                let active = self.filter == f;
                 let n = count(f);
                 btn(("filter", f.count_index()))
-                    .small()
+                    .xsmall()
+                    .ghost()
+                    .selected(self.filter == f)
                     .icon(filter_icon(f))
                     .label(if f == Filter::All {
                         format!("All {n}")
@@ -268,12 +274,10 @@ impl MainView {
                         n.to_string()
                     })
                     .tooltip(format!("{} ({n})", f.label()))
-                    .when(active, |b| b.primary())
-                    .when(!active, |b| b.ghost())
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.filter = f;
                         this.recompute_visible();
-                        // Keep arrow keys on the grid, not on the chip.
+                        // Keep arrow keys on the grid, not on the toggle.
                         window.focus(&this.focus, cx);
                         cx.notify();
                     }))
@@ -281,21 +285,21 @@ impl MainView {
             })
             .collect();
 
-        // A band of its own (the shade of the sidebar and transfers panel)
-        // with a line below, so the controls don't run into the photos.
+        let divider = || div().w(px(1.)).h(px(16.)).mx_1().bg(theme.border);
+
         v_flex()
             .flex_shrink_0()
             .px(px(PAD))
-            .pt(px(PAD))
-            .pb_3()
-            .gap_2()
-            .bg(theme.sidebar)
+            .pt_2()
+            .pb_2()
+            .gap_1()
             .border_b_1()
             .border_color(theme.border)
             .child(
                 h_flex()
+                    .h(px(32.))
                     .gap_3()
-                    .items_baseline()
+                    .items_center()
                     .child(
                         div()
                             .text_lg()
@@ -304,14 +308,6 @@ impl MainView {
                     )
                     .child(muted(summary, &theme))
                     .child(div().flex_1())
-                    .child(
-                        div().w(px(240.)).flex_shrink_1().min_w(px(120.)).child(
-                            gpui_kit::component::input::Input::new(&self.search)
-                                .small()
-                                .cleanable(true)
-                                .prefix(Icon::new(IconName::Search).small()),
-                        ),
-                    )
                     .when(!self.visible.is_empty(), |d| {
                         d.child(
                             btn("select-all")
@@ -340,115 +336,11 @@ impl MainView {
                                     cx.notify();
                                 })),
                         )
-                    }),
-            )
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .gap_1()
-                    .children(chips)
-                    .child(div().w(px(12.)))
-                    .when(self.dest_root().is_some(), |d| {
-                        d.child(sync_chip(
-                            "s-copied",
-                            "Copied",
-                            SyncFilter::Copied,
-                            self.sync_filter,
-                            self.sync_counts[1],
-                            cx,
-                        ))
-                        .child(sync_chip(
-                            "s-not-copied",
-                            "Not copied",
-                            SyncFilter::NotCopied,
-                            self.sync_filter,
-                            self.sync_counts[2],
-                            cx,
-                        ))
                     })
-                    .child(div().flex_1())
-                    .when(!self.list_view, |d| {
-                        d.child(
-                            h_flex()
-                                .child(
-                                    btn("zoom-out")
-                                        .small()
-                                        .ghost()
-                                        .icon(IconName::ZoomOut)
-                                        .tooltip("Smaller thumbnails (Ctrl+−)")
-                                        .disabled(self.tile_target <= TILE_MIN)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.zoom(-1, cx);
-                                            window.focus(&this.focus, cx);
-                                        })),
-                                )
-                                .child(
-                                    btn("zoom-in")
-                                        .small()
-                                        .ghost()
-                                        .icon(IconName::ZoomIn)
-                                        .tooltip("Bigger thumbnails (Ctrl+=, or Ctrl+scroll)")
-                                        .disabled(self.tile_target >= TILE_MAX)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.zoom(1, cx);
-                                            window.focus(&this.focus, cx);
-                                        })),
-                                ),
-                        )
-                    })
-                    .child(
-                        h_flex()
-                            .child(
-                                btn("view-grid")
-                                    .small()
-                                    .icon(IconName::LayoutGrid)
-                                    .tooltip("Grid")
-                                    .when(!self.list_view, |b| b.primary())
-                                    .when(self.list_view, |b| b.ghost())
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.set_list_view(false, cx);
-                                        window.focus(&this.focus, cx);
-                                    })),
-                            )
-                            .child(
-                                btn("view-list")
-                                    .small()
-                                    .icon(IconName::List)
-                                    .tooltip("List (no thumbnails)")
-                                    .when(self.list_view, |b| b.primary())
-                                    .when(!self.list_view, |b| b.ghost())
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.set_list_view(true, cx);
-                                        window.focus(&this.focus, cx);
-                                    })),
-                            ),
-                    )
-                    .child(
-                        btn("sort")
-                            .small()
-                            .ghost()
-                            .icon(if self.newest_first {
-                                IconName::ArrowDownWideNarrow
-                            } else {
-                                IconName::ArrowUpNarrowWide
-                            })
-                            .label(if self.newest_first {
-                                "Newest first"
-                            } else {
-                                "Oldest first"
-                            })
-                            .tooltip("Sort by date taken")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.newest_first = !this.newest_first;
-                                this.recompute_visible();
-                                window.focus(&this.focus, cx);
-                                cx.notify();
-                            })),
-                    )
                     .when(copyable > 0 && self.dest_root().is_some(), |d| {
                         d.child(
                             btn("copy-all")
-                                .small()
+                                .xsmall()
                                 .outline()
                                 .label(format!("Copy all ({copyable})"))
                                 .tooltip("Copy everything shown here")
@@ -460,12 +352,156 @@ impl MainView {
                         )
                     }),
             )
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap_1()
+                    .items_center()
+                    .children(chips)
+                    .when(self.dest_root().is_some(), |d| {
+                        d.child(divider())
+                            .child(sync_chip(
+                                "s-copied",
+                                "Copied",
+                                SyncFilter::Copied,
+                                self.sync_filter,
+                                self.sync_counts[1],
+                                cx,
+                            ))
+                            .child(sync_chip(
+                                "s-not-copied",
+                                "Not copied",
+                                SyncFilter::NotCopied,
+                                self.sync_filter,
+                                self.sync_counts[2],
+                                cx,
+                            ))
+                    })
+                    .child(div().flex_1())
+                    .child(self.render_sort_button(cx))
+                    .when(!self.list_view, |d| {
+                        d.child(divider())
+                            .child(
+                                btn("zoom-out")
+                                    .xsmall()
+                                    .ghost()
+                                    .icon(IconName::ZoomOut)
+                                    .tooltip("Smaller thumbnails (Ctrl+−)")
+                                    .disabled(self.tile_target <= TILE_MIN)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.zoom(-1, cx);
+                                        window.focus(&this.focus, cx);
+                                    })),
+                            )
+                            .child(
+                                btn("zoom-in")
+                                    .xsmall()
+                                    .ghost()
+                                    .icon(IconName::ZoomIn)
+                                    .tooltip("Bigger thumbnails (Ctrl+=, or Ctrl+scroll)")
+                                    .disabled(self.tile_target >= TILE_MAX)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.zoom(1, cx);
+                                        window.focus(&this.focus, cx);
+                                    })),
+                            )
+                    })
+                    .child(divider())
+                    .child(
+                        btn("view-grid")
+                            .xsmall()
+                            .ghost()
+                            .selected(!self.list_view)
+                            .icon(IconName::LayoutGrid)
+                            .tooltip("Grid")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.set_list_view(false, cx);
+                                window.focus(&this.focus, cx);
+                            })),
+                    )
+                    .child(
+                        btn("view-list")
+                            .xsmall()
+                            .ghost()
+                            .selected(self.list_view)
+                            .icon(IconName::List)
+                            .tooltip("List (no thumbnails)")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.set_list_view(true, cx);
+                                window.focus(&this.focus, cx);
+                            })),
+                    ),
+            )
             .when(self.selection == Selection::RecentlyDeleted, |d| {
                 d.child(muted(
                     "Items in Recently Deleted are shown for reference and are never copied."
                         .to_owned(),
                     &theme,
                 ))
+            })
+    }
+
+    /// The sort button and its menu: what to sort by, then which way.
+    fn render_sort_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let sort = self.sort;
+        let view = cx.entity().downgrade();
+        let set = move |next: Sort| {
+            let view = view.clone();
+            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                let _ = view.update(cx, |this, cx| {
+                    this.sort = next;
+                    this.recompute_visible();
+                    window.focus(&this.focus, cx);
+                    cx.notify();
+                });
+            }
+        };
+        btn("sort")
+            .xsmall()
+            .ghost()
+            .icon(if sort.descending {
+                IconName::ArrowDownWideNarrow
+            } else {
+                IconName::ArrowUpNarrowWide
+            })
+            .label(sort.label())
+            .tooltip(format!(
+                "Sorted by {}, {}",
+                sort.key.label().to_lowercase(),
+                sort.direction().to_lowercase()
+            ))
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _, _| {
+                for key in SortKey::ALL {
+                    // A new key starts in its natural direction: newest,
+                    // largest, A to Z.
+                    let next = Sort {
+                        key,
+                        descending: matches!(key, SortKey::Date | SortKey::Size),
+                    };
+                    menu = menu.item(
+                        PopupMenuItem::new(key.label())
+                            .checked(sort.key == key)
+                            .on_click(set(if sort.key == key { sort } else { next })),
+                    );
+                }
+                let (desc, asc) = sort.direction_labels();
+                menu.separator()
+                    .item(
+                        PopupMenuItem::new(desc)
+                            .checked(sort.descending)
+                            .on_click(set(Sort {
+                                descending: true,
+                                ..sort
+                            })),
+                    )
+                    .item(
+                        PopupMenuItem::new(asc)
+                            .checked(!sort.descending)
+                            .on_click(set(Sort {
+                                descending: false,
+                                ..sort
+                            })),
+                    )
             })
     }
 
@@ -516,7 +552,8 @@ impl MainView {
     /// Rebuilds the grid's rows when the items, the columns or the grouping
     /// changed. Grouped by month unless a single month is selected.
     fn rebuild_rows(&mut self, cols: usize) {
-        let grouped = !matches!(self.selection, Selection::Month(..));
+        let grouped =
+            self.sort.groups_by_month() && !matches!(self.selection, Selection::Month(..));
         let key = (self.visible_gen, cols, grouped);
         let Some(old) = self.rows_key.replace(key) else {
             self.build_rows(cols, grouped);
@@ -945,10 +982,10 @@ fn sync_chip(
     // `current` is passed in: reading the view here would panic mid-render.
     let active = current == f;
     btn(id)
-        .small()
+        .xsmall()
+        .ghost()
+        .selected(active)
         .label(format!("{label} {n}"))
-        .when(active, |b| b.primary())
-        .when(!active, |b| b.ghost())
         .on_click(cx.listener(move |this, _, window, cx| {
             this.sync_filter = if this.sync_filter == f {
                 SyncFilter::All

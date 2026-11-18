@@ -185,8 +185,8 @@ pub struct MainView {
     pub(crate) sync_counts: [usize; 3],
     /// Counts need rebuilding (a copy finished since the last count).
     pub(crate) counts_dirty: bool,
-    /// Sort by date taken, newest first (default) or oldest first.
-    pub(crate) newest_first: bool,
+    /// Grid order (date taken, newest first, by default).
+    pub(crate) sort: crate::filters::Sort,
     /// Thumbnail size the user zoomed to (see `grid::TILE_*`).
     pub(crate) tile_target: f32,
     /// Touchpad Ctrl+scroll not yet turned into a zoom step.
@@ -373,7 +373,7 @@ impl MainView {
             sync_filter: SyncFilter::All,
             sync_counts: [0; 3],
             counts_dirty: false,
-            newest_first: true,
+            sort: crate::filters::Sort::default(),
             search,
             query: String::new(),
             new_count: 0,

@@ -1,5 +1,6 @@
-//! The toolbar: Save to, Copy selected, menu, Preferences, theme, GitHub,
-//! and the phone with its Reload button.
+//! The toolbar: menu, Copy new / Copy selected, the Save-to folder,
+//! search, Reload, Preferences, theme and GitHub. The phone itself is in
+//! the sidebar.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::h_flex;
@@ -29,30 +30,39 @@ impl MainView {
         } else {
             let theme = cx.theme().clone();
             bar.w_full()
-                .px_4()
-                .py_2()
+                .px_3()
+                .py(px(6.))
+                .bg(theme.title_bar)
                 .border_b_1()
                 .border_color(theme.border)
                 .into_any_element()
         }
     }
 
+    /// Menu and copy buttons on the left, the Save-to folder in the
+    /// middle, search and the app buttons on the right.
     fn render_toolbar_row(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
-        let save_to = self.render_save_to(cx);
-        let status = match &self.phase {
-            Phase::Ready { info } => info.name.clone(),
-            Phase::NoDevice { .. } | Phase::UsbmuxdMissing => "No iPhone connected".into(),
-            _ => "Connecting…".into(),
-        };
-        let ready = matches!(self.library, LibState::Loaded { .. });
+        let ready = matches!(self.library, LibState::Loaded { .. })
+            && matches!(self.phase, Phase::Ready { .. });
+        let reload = ready.then(|| {
+            btn("reload")
+                .xsmall()
+                .ghost()
+                .icon(IconName::RefreshCw)
+                .tooltip("Reload from iPhone (F5)")
+                .disabled(self.reloading)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.reload_library();
+                    cx.notify();
+                }))
+        });
         // Buttons never shrink; when the window is narrow the Save-to path
-        // and then the phone's name are cut short instead.
-        let buttons = h_flex()
+        // and the search box give way instead.
+        let app_buttons = h_flex()
             .flex_shrink_0()
-            .gap_2()
+            .gap_1()
             .items_center()
-            .child(self.render_app_menu())
+            .children(reload)
             .child(
                 btn("prefs")
                     .xsmall()
@@ -73,11 +83,10 @@ impl MainView {
                         ThemeChoice::Dark => IconName::Moon,
                     })
                     .tooltip(ThemeChoice::from(self.config.app.theme).label())
-                    .on_click(cx.listener(|this, _, window, cx| {
+                    .on_click(cx.listener(|this, _, _, cx| {
                         // Saved; the Prefs observer applies it.
                         let next = ThemeChoice::from(this.config.app.theme).next();
                         Prefs::update_config(cx, |c| c.app.theme = next.into());
-                        let _ = window;
                         cx.notify();
                     })),
             )
@@ -89,44 +98,24 @@ impl MainView {
                     .tooltip("Rollcopy on GitHub")
                     .on_click(|_, _, cx| cx.open_url(crate::update::REPO_URL)),
             );
-        let reload = ready.then(|| {
-            btn("reload")
-                .xsmall()
-                .ghost()
-                .icon(IconName::RefreshCw)
-                .tooltip("Reload from iPhone (F5)")
-                .disabled(self.reloading)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.reload_library();
-                    cx.notify();
-                }))
+        let search = ready.then(|| {
+            div().w(px(220.)).min_w(px(120.)).flex_shrink_1().child(
+                gpui_kit::component::input::Input::new(&self.search)
+                    .small()
+                    .cleanable(true)
+                    .prefix(Icon::new(IconName::Search).small()),
+            )
         });
         h_flex()
             .gap_2()
             .items_center()
             .min_w_0()
-            .child(Icon::new(IconName::Smartphone).small().flex_shrink_0())
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Rollcopy"),
-            )
-            .child(div().w(px(24.)).flex_shrink_0())
-            .children(save_to)
-            .child(div().flex_1())
-            .child(buttons)
-            .child(
-                div()
-                    .min_w_0()
-                    .max_w(px(220.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
-                    .child(status),
-            )
-            .children(reload.map(|b| div().flex_shrink_0().child(b)))
+            .child(div().flex_shrink_0().child(self.render_app_menu()))
+            .children(self.render_copy_buttons(cx))
+            .child(div().flex_1().min_w(px(8.)))
+            .children(self.render_save_to(cx))
+            .child(div().flex_1().min_w(px(8.)))
+            .children(search)
+            .child(app_buttons)
     }
 }
