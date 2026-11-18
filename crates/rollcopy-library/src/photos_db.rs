@@ -181,12 +181,17 @@ fn read_albums(conn: &Connection) -> rusqlite::Result<HashMap<i64, Vec<String>>>
         )?
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
-    let found = tables.iter().find_map(|t| {
-        let cols = columns(conn, t).ok()?;
-        let album = cols.iter().find(|c| is_numbered(c, "ALBUMS"))?.clone();
-        let asset = cols.iter().find(|c| is_numbered(c, "ASSETS"))?.clone();
-        Some((t.clone(), album, asset))
-    });
+    // Only `Z_<digits>ASSETS`: the name goes into the SQL below, and the
+    // LIKE pattern alone lets anything through (review S4).
+    let found = tables
+        .iter()
+        .filter(|t| is_numbered(t, "ASSETS"))
+        .find_map(|t| {
+            let cols = columns(conn, t).ok()?;
+            let album = cols.iter().find(|c| is_numbered(c, "ALBUMS"))?.clone();
+            let asset = cols.iter().find(|c| is_numbered(c, "ASSETS"))?.clone();
+            Some((t.clone(), album, asset))
+        });
     let Some((table, album_col, asset_col)) = found else {
         return Ok(out);
     };
