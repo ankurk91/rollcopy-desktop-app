@@ -18,7 +18,14 @@ pub struct Prefs {
     pub notice: Option<String>,
     /// A reset is under way: don't write anything back before the restart.
     resetting: bool,
+    /// `ui` changed since it was last saved; bumped on every change so
+    /// only the last of a burst saves (see `update_ui`).
+    ui_changes: u64,
+    ui_saved: u64,
 }
+
+/// Quiet time before window state is saved after a change.
+const UI_SAVE_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 
 impl Global for Prefs {}
 
@@ -37,6 +44,8 @@ impl Prefs {
             ui_path,
             notice,
             resetting: false,
+            ui_changes: 0,
+            ui_saved: 0,
         }
     }
 
@@ -86,13 +95,36 @@ impl Prefs {
         });
     }
 
-    /// Changes and saves window state (no need to notify: nothing renders it).
+    /// Changes window state (no need to notify: nothing renders it) and
+    /// saves it once nothing has changed for [`UI_SAVE_DELAY`]. Zooming
+    /// with Ctrl+scroll changes it many times a second, and each save is a
+    /// write and an fsync on the UI thread (review P6).
     pub fn update_ui(cx: &mut App, f: impl FnOnce(&mut UiState)) {
         let p = cx.global_mut::<Prefs>();
         if p.resetting {
             return;
         }
         f(&mut p.ui);
+        p.ui_changes += 1;
+        let change = p.ui_changes;
+        cx.spawn(async move |cx| {
+            cx.background_executor().timer(UI_SAVE_DELAY).await;
+            cx.update(|cx| {
+                if cx.global::<Prefs>().ui_changes == change {
+                    Prefs::flush_ui(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Saves window state now if it changed (closing the window, quitting).
+    pub fn flush_ui(cx: &mut App) {
+        let p = cx.global_mut::<Prefs>();
+        if p.resetting || p.ui_saved == p.ui_changes {
+            return;
+        }
+        p.ui_saved = p.ui_changes;
         let _ = config::save(&p.ui_path, &p.ui);
     }
 

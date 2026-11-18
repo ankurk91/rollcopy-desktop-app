@@ -50,6 +50,7 @@ impl MainView {
             ui.transfers_expanded = expanded;
             ui.list_view = list_view;
         });
+        Prefs::flush_ui(cx);
     }
 
     /// Quit after saving window state.

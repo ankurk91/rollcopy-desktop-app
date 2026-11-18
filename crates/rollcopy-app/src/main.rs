@@ -199,7 +199,8 @@ fn main() {
         // remove this session's unfinished copies, then the session-only
         // files (viewer images, opened files). Synchronous: gpui gives the
         // returned future only 200 ms (review C4).
-        cx.on_app_quit(move |_| {
+        cx.on_app_quit(move |cx| {
+            prefs::Prefs::flush_ui(cx);
             if !rollcopy_convert::shutdown(std::time::Duration::from_millis(500)) {
                 applog!("a conversion was still running at quit");
             }
