@@ -114,11 +114,19 @@ impl History {
     }
 }
 
+/// One CSV cell. A cell starting with `=`, `+`, `-`, `@`, tab or CR gets
+/// a leading `'`, so LibreOffice and Excel show it as text instead of
+/// running it as a formula (OWASP "CSV injection"; review S6).
 fn csv(s: &str) -> String {
+    let s = if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{s}")
+    } else {
+        s.to_owned()
+    };
     if s.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
-        s.to_owned()
+        s
     }
 }
 
@@ -145,6 +153,18 @@ mod tests {
         assert_eq!(h.export_csv(&out).unwrap(), 1);
         let text = std::fs::read_to_string(out).unwrap();
         assert!(text.contains("\"bad \"\"data\"\", truncated\""));
+    }
+
+    #[test]
+    fn cells_never_run_as_formulas() {
+        assert_eq!(csv("=HYPERLINK(\"x\")"), "\"'=HYPERLINK(\"\"x\"\")\"");
+        assert_eq!(csv("@SUM(A1)"), "'@SUM(A1)");
+        assert_eq!(csv("-1+2"), "'-1+2");
+        assert_eq!(
+            csv("/DCIM/100APPLE/IMG_0001.HEIC"),
+            "/DCIM/100APPLE/IMG_0001.HEIC"
+        );
+        assert_eq!(csv("read failed, retrying"), "\"read failed, retrying\"");
     }
 
     #[test]
