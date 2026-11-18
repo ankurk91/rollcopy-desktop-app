@@ -318,15 +318,10 @@ async fn run_inner(
     }
     let dest = spec.dest.clone();
     let overwrite = spec.overwrite;
+    let cancel = spec.cancel.clone();
     tokio::task::spawn_blocking(move || {
         let existed = overwrite && dest.exists();
-        let persisted = persist_into(
-            part_guard,
-            &dest,
-            overwrite,
-            |p, d| p.persist_noclobber(d),
-            |p, d| p.persist(d),
-        );
+        let persisted = persist_unless_cancelled(part_guard, &dest, overwrite, &cancel)?;
         match persisted {
             Ok(()) => {
                 sync_parent(&dest);
@@ -341,6 +336,28 @@ async fn run_inner(
     })
     .await
     .map_err(|e| failed(Stage::Write, e))?
+}
+
+/// The final rename, unless the job was cancelled meanwhile. Aborting the
+/// job's task doesn't stop this blocking step, so without the check a job
+/// shown as Cancelled could still put its file in place (review C5). A
+/// cancelled job's temporary file is deleted as `part` drops.
+fn persist_unless_cancelled(
+    part: TempPath,
+    dest: &Path,
+    overwrite: bool,
+    cancel: &rollcopy_convert::Cancel,
+) -> Result<Result<(), tempfile::PathPersistError>, JobError> {
+    if cancel.is_cancelled() {
+        return Err(failed(Stage::Write, "cancelled"));
+    }
+    Ok(persist_into(
+        part,
+        dest,
+        overwrite,
+        |p, d| p.persist_noclobber(d),
+        |p, d| p.persist(d),
+    ))
 }
 
 /// Moves the finished temporary file to `dest`.
@@ -435,6 +452,26 @@ async fn blocking<T: Send + 'static>(
 
 #[cfg(test)]
 mod tests {
+    /// Cancelled just before the rename: nothing reaches the destination
+    /// and the temporary file goes.
+    #[test]
+    fn cancelled_job_is_not_renamed_into_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join(".rollcopy-1-1-IMG_0001.JPG.part");
+        let dest = dir.path().join("IMG_0001.JPG");
+        std::fs::write(&part, b"photo").unwrap();
+        let cancel = rollcopy_convert::Cancel::new();
+        cancel.cancel();
+        let r = super::persist_unless_cancelled(
+            tempfile::TempPath::try_from_path(&part).unwrap(),
+            &dest,
+            false,
+            &cancel,
+        );
+        assert!(r.is_err());
+        assert!(!dest.exists() && !part.exists());
+    }
+
     /// At quit only this process's unfinished files go; another running
     /// Rollcopy's and the user's own files stay.
     #[test]

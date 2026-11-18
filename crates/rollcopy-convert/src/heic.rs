@@ -141,7 +141,12 @@ pub fn heic_to_jpeg_with(
         has_exif: d.exif.is_some(),
         has_icc: d.icc.is_some(),
     };
-    write_jpeg(dst, &d.rgb, (d.width, d.height), quality, d.icc, d.exif)?;
+    if let Err(e) = write_jpeg(dst, &d.rgb, (d.width, d.height), quality, d.icc, d.exif) {
+        // Don't leave a half-written file; the caller's guard may already
+        // be gone (review C5).
+        let _ = std::fs::remove_file(dst);
+        return Err(e);
+    }
     if cancel.is_cancelled() {
         let _ = std::fs::remove_file(dst);
         return Err(ConvertError::Cancelled);
