@@ -55,12 +55,22 @@ pub async fn list_devices() -> Result<Vec<DeviceRef>> {
     let devices = mux.get_devices().await.map_err(usbmuxd_unavailable)?;
     Ok(devices
         .into_iter()
+        // The UDID names cache folders (`thumbs/<udid>/…`), and the phone
+        // reports it, so only the usual shape is accepted (review S3).
+        .filter(|d| valid_udid(&d.udid))
         .map(|d| DeviceRef {
             usb: d.connection_type == Connection::Usb,
             udid: d.udid,
             mux_id: d.device_id,
         })
         .collect())
+}
+
+/// Whether `udid` looks like an Apple UDID (`00008030-001A…` or 40 hex
+/// digits): letters, digits and dashes, 8 to 64 of them. Anything else
+/// could steer a cache path elsewhere (`../`), so such devices are ignored.
+pub fn valid_udid(udid: &str) -> bool {
+    (8..=64).contains(&udid.len()) && udid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 /// The USB attachment of `udid`. With Wi-Fi sync on, usbmuxd may also
@@ -186,7 +196,9 @@ impl Session {
 
         let product_type = s("ProductType").unwrap_or_default();
         let mut info = DeviceInfo {
-            udid: s("UniqueDeviceID").unwrap_or_else(|| self.udid.clone()),
+            // usbmuxd's UDID, checked when listed; the same phone reports
+            // the same one over lockdown (review S3).
+            udid: self.udid.clone(),
             name: s("DeviceName").unwrap_or_default(),
             model: models::display_model(&product_type),
             product_type,
@@ -280,6 +292,17 @@ pub async fn pair(udid: &str) -> Result<()> {
 #[cfg(test)]
 mod pair_record_tests {
     use super::*;
+
+    /// Review S3: a UDID with `/` or `..` would leave the cache folder.
+    #[test]
+    fn udids_that_could_leave_the_cache_are_refused() {
+        assert!(valid_udid("00008030-001A2B3C4D5E6F70"));
+        assert!(valid_udid("0123456789abcdef0123456789abcdef01234567"));
+        let long = "x".repeat(65);
+        for bad in ["../../x/aaaaaa", "abc", "a/b-c-d-e-f", "", long.as_str()] {
+            assert!(!valid_udid(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn only_a_missing_record_means_not_paired() {
