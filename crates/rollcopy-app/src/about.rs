@@ -145,8 +145,22 @@ impl MainView {
         }
     }
 
-    fn debug_info(&self) -> String {
-        crate::report::DebugInfo::collect(self.phone_summary()).text()
+    /// Puts the debug info on the clipboard. Collected in the background:
+    /// it runs `usbmuxd --version` and `ffmpeg -version` (review P8).
+    fn copy_debug_info(&mut self, cx: &mut Context<Self>) {
+        let phone = self.phone_summary();
+        let task = cx
+            .background_executor()
+            .spawn(async move { crate::report::DebugInfo::collect(phone).text() });
+        cx.spawn(async move |this, cx| {
+            let text = task.await;
+            let _ = this.update(cx, |this, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+                this.about_note = Some("Debug info copied".into());
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Opens the bug-report form with version, OS and phone model filled in.
@@ -263,13 +277,9 @@ impl MainView {
                                     .outline()
                                     .icon(IconName::Copy)
                                     .label("Copy debug info")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(
-                                            this.debug_info(),
-                                        ));
-                                        this.about_note = Some("Debug info copied".into());
-                                        cx.notify();
-                                    })),
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.copy_debug_info(cx)),
+                                    ),
                             ),
                         ),
                 )

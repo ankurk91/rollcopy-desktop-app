@@ -183,8 +183,16 @@ fn main() {
         cx.on_action(|_: &view::OpenPreferences, cx| prefs_window::open(cx));
         cx.on_action(|_: &view::ViewOnGitHub, cx| cx.open_url(update::REPO_URL));
         // The main window answers this itself, adding the phone model.
+        // Collected in the background: it runs `usbmuxd` and `ffmpeg`.
         cx.on_action(|_: &view::ReportIssue, cx| {
-            cx.open_url(&report::DebugInfo::collect(None).issue_url())
+            let task = cx
+                .background_executor()
+                .spawn(async { report::DebugInfo::collect(None).issue_url() });
+            cx.spawn(async move |cx| {
+                let url = task.await;
+                cx.update(|cx| cx.open_url(&url));
+            })
+            .detach();
         });
         cx.on_action(|_: &view::Quit, cx| cx.quit());
         // At quit: stop conversions (a child ffmpeg outlives its parent),
