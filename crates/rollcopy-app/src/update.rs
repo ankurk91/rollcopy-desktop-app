@@ -198,8 +198,9 @@ mod tests {
     /// Live check against GitHub. Run with `cargo test -- --ignored`.
     #[test]
     #[ignore = "network"]
-    fn live_repository_has_no_releases_yet() {
-        assert_eq!(check_url(LATEST_URL, "0.1.0"), UpdateCheck::NoReleases);
+    fn live_release_is_newer_than_0_1_0() {
+        let r = check_url(LATEST_URL, "0.1.0");
+        assert!(matches!(r, UpdateCheck::Newer { .. }), "{r:?}");
     }
 
     #[test]
