@@ -289,7 +289,7 @@ async fn run_inner(
             let cancel = spec.cancel.clone();
             let source_info = blocking(move || {
                 let info = rollcopy_convert::probe(&src)?;
-                rollcopy_convert::to_mp4_with(&src, &dst, mode, &cancel)?;
+                rollcopy_convert::to_mp4_with_info(&src, &dst, mode, &info, &cancel)?;
                 Ok(info)
             })
             .await

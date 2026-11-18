@@ -8,7 +8,10 @@ mod video;
 
 pub use display::{display_jpeg, image_size, veil_jpeg};
 pub use heic::{DEFAULT_JPEG_QUALITY, JpegInfo, heic_to_jpeg, heic_to_jpeg_with, verify_jpeg};
-pub use video::{VideoInfo, VideoMode, ffmpeg_available, probe, to_mp4, to_mp4_with, verify_mp4};
+pub use video::{
+    VideoInfo, VideoMode, ffmpeg_available, probe, to_mp4, to_mp4_with, to_mp4_with_info,
+    verify_mp4,
+};
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};

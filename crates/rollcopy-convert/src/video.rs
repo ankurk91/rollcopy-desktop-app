@@ -236,7 +236,20 @@ pub fn to_mp4_with(
     mode: VideoMode,
     cancel: &Cancel,
 ) -> Result<(), ConvertError> {
-    let result = convert(src, dst, mode, cancel);
+    let info = probe(src)?;
+    to_mp4_with_info(src, dst, mode, &info, cancel)
+}
+
+/// [`to_mp4_with`] for a caller that has already probed `src`, so it
+/// isn't probed twice (review P4).
+pub fn to_mp4_with_info(
+    src: &Path,
+    dst: &Path,
+    mode: VideoMode,
+    info: &VideoInfo,
+    cancel: &Cancel,
+) -> Result<(), ConvertError> {
+    let result = convert(src, dst, mode, info, cancel);
     if cancel.is_cancelled() {
         let _ = std::fs::remove_file(dst);
         return Err(ConvertError::Cancelled);
@@ -244,21 +257,26 @@ pub fn to_mp4_with(
     result
 }
 
-fn convert(src: &Path, dst: &Path, mode: VideoMode, cancel: &Cancel) -> Result<(), ConvertError> {
-    let info = probe(src)?;
+fn convert(
+    src: &Path,
+    dst: &Path,
+    mode: VideoMode,
+    info: &VideoInfo,
+    cancel: &Cancel,
+) -> Result<(), ConvertError> {
     if mode == VideoMode::H264
         && let Some(device) = gpu_device()
     {
         // A clip the GPU path can't take is done in software below.
-        match run_h264(src, dst, &info, Encoder::Gpu(device), cancel) {
+        match run_h264(src, dst, info, Encoder::Gpu(device), cancel) {
             Ok(()) => return Ok(()),
             Err(ConvertError::Cancelled) => return Err(ConvertError::Cancelled),
             Err(_) => {}
         }
     }
     match mode {
-        VideoMode::Remux => run_remux(src, dst, &info, cancel),
-        VideoMode::H264 => run_h264(src, dst, &info, Encoder::Cpu, cancel),
+        VideoMode::Remux => run_remux(src, dst, info, cancel),
+        VideoMode::H264 => run_h264(src, dst, info, Encoder::Cpu, cancel),
     }
 }
 
