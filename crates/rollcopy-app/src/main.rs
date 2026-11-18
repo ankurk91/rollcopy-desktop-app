@@ -75,6 +75,8 @@ gpui_kit_assets::icon_assets!(
         FolderCheck,
         FolderOpen,
         Menu,
+        PanelRight,
+        PanelRightClose,
         Moon,
         Sun,
         SunMoon,

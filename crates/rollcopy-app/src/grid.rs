@@ -430,6 +430,24 @@ impl MainView {
                                 this.set_list_view(true, cx);
                                 window.focus(&this.focus, cx);
                             })),
+                    )
+                    .child(divider())
+                    .child(
+                        btn("toggle-info")
+                            .xsmall()
+                            .ghost()
+                            .selected(self.preview_open)
+                            .icon(IconName::PanelRight)
+                            .tooltip(if self.preview_open {
+                                "Hide info (I)"
+                            } else {
+                                "Show info (I)"
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.set_info_open(!this.preview_open);
+                                window.focus(&this.focus, cx);
+                                cx.notify();
+                            })),
                     ),
             )
             .when(self.selection == Selection::RecentlyDeleted, |d| {
@@ -884,7 +902,7 @@ impl MainView {
             return;
         };
         self.focused = Some(idx);
-        self.preview_open = true;
+        self.preview_open = !self.info_closed;
         self.status = None;
         if clicks >= 2 {
             self.activate_focused();
@@ -933,7 +951,7 @@ impl MainView {
         };
         let idx = self.visible[pos];
         self.focused = Some(idx);
-        self.preview_open = true;
+        self.preview_open = !self.info_closed;
         self.status = None;
         if extend {
             let anchor = self.anchor.or(current).unwrap_or(pos);

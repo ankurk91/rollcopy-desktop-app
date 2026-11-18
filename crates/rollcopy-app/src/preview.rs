@@ -22,14 +22,43 @@ impl MainView {
     pub(crate) fn render_preview(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let body = self.render_preview_body(cx).into_any_element();
-        div()
+        v_flex()
             .relative()
             .w(px(self.preview_w))
             .h_full()
             .flex_shrink_0()
+            .bg(theme.sidebar)
             .border_l_1()
             .border_color(theme.border)
-            .child(body)
+            .child(
+                h_flex()
+                    .flex_shrink_0()
+                    .h(px(36.))
+                    .px_3()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Info"),
+                    )
+                    .child(
+                        btn("close-preview")
+                            .xsmall()
+                            .ghost()
+                            .icon(IconName::PanelRightClose)
+                            .tooltip("Hide info (I)")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.set_info_open(false);
+                                window.focus(&this.focus, cx);
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(div().flex_1().min_h_0().child(body))
             .child(
                 resize_handle::<ResizePreview, ResizePreview>("preview-edge", Axis::Horizontal)
                     .inside(HandleEdge::Leading)
@@ -37,34 +66,23 @@ impl MainView {
             )
     }
 
+    /// Opens or closes the info pane. Closed by the user, it stays closed
+    /// when another item is picked, until opened again.
+    pub(crate) fn set_info_open(&mut self, open: bool) {
+        self.preview_open = open;
+        self.info_closed = !open;
+    }
+
     fn render_preview_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         // The image follows the pane width at 4:3, the shape of iOS thumbnails.
-        let image_h = ((self.preview_w - 32.) * 0.75).max(120.);
+        let image_h = ((self.preview_w - 24.) * 0.75).max(120.);
         let pane = v_flex()
             .id("preview-pane")
             .size_full()
             .overflow_y_scrollbar()
-            .p_4()
-            .gap_3()
-            .child(
-                h_flex()
-                    .items_center()
-                    .child(section_label("PREVIEW", &theme))
-                    .child(div().flex_1())
-                    .child(
-                        btn("close-preview")
-                            .xsmall()
-                            .ghost()
-                            .icon(IconName::X)
-                            .tooltip("Close preview")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.preview_open = false;
-                                window.focus(&this.focus, cx);
-                                cx.notify();
-                            })),
-                    ),
-            );
+            .p_3()
+            .gap_3();
 
         let Some(a) = self.focused.and_then(|i| self.assets().get(i)) else {
             return pane.child(muted("Select an item to see its details.".into(), &theme));
@@ -82,25 +100,15 @@ impl MainView {
                     ObjectFit::Contain
                 })
                 .into_any_element(),
-            _ => div()
-                .w_full()
-                .h(px(image_h))
-                .rounded_md()
-                .bg(theme.muted)
-                .into_any_element(),
-        };
-
-        let open_label = if a.kind == MediaKind::Video {
-            "Open ▶"
-        } else {
-            "Open"
+            _ => div().w_full().h(px(image_h)).into_any_element(),
         };
 
         // Hidden album: blurred until the user asks to see it.
         let image = div()
             .relative()
-            .rounded_md()
+            .rounded(px(crate::palette::RADIUS))
             .overflow_hidden()
+            .bg(theme.title_bar)
             .child(image)
             .when(a.hidden, |d| {
                 let key = key.clone();
@@ -134,60 +142,76 @@ impl MainView {
                 )
             });
 
+        // "Video · 0:12 · 3 Mar 2026"
+        let mut subtitle = vec![kind_label(a)];
+        if let Some(d) = a.captured_local() {
+            subtitle.push(d.format("%-d %b %Y").to_string());
+        }
+
+        let copied = self.in_dest.get(&a.device_path()).cloned().flatten();
+        let actions = h_flex()
+            .gap_2()
+            .flex_wrap()
+            .when(!a.trashed && self.dest_root().is_some(), |d| {
+                d.child(
+                    btn("copy-focused")
+                        .small()
+                        .primary()
+                        .icon(IconName::Copy)
+                        .label("Copy")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.copy_focused();
+                            cx.notify();
+                        })),
+                )
+            })
+            .child(
+                btn("open-focused")
+                    .small()
+                    .outline()
+                    .icon(if a.kind == MediaKind::Video {
+                        IconName::Video
+                    } else {
+                        IconName::Image
+                    })
+                    .label("Open")
+                    .tooltip("Copy to a temporary folder and open with the system app")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_focused();
+                        cx.notify();
+                    })),
+            )
+            .when_some(copied, |d, path| {
+                d.child(
+                    btn("show-copy")
+                        .small()
+                        .ghost()
+                        .icon(IconName::FolderOpen)
+                        .label("Show in folder")
+                        .tooltip("Show the copy in the file manager")
+                        .on_click(move |_, _, _| crate::desktop::show_in_folder(&path)),
+                )
+            });
+
         pane.child(image)
             .child(
-                div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(a.filename.clone()),
-            )
-            .child(info_rows(a, self.copied_to(a), &theme, cx))
-            .child(
-                h_flex()
-                    .gap_2()
-                    .when(!a.trashed && self.dest_root().is_some(), |d| {
-                        d.child(
-                            btn("copy-focused")
-                                .small()
-                                .primary()
-                                .icon(IconName::Copy)
-                                .label("Copy")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.copy_focused();
-                                    cx.notify();
-                                })),
-                        )
-                    })
-                    .when_some(
-                        self.in_dest.get(&a.device_path()).cloned().flatten(),
-                        |d, path| {
-                            d.child(
-                                btn("show-copy")
-                                    .small()
-                                    .ghost()
-                                    .icon(IconName::FolderOpen)
-                                    .tooltip("Show the copy in the file manager")
-                                    .on_click(move |_, _, _| crate::desktop::show_in_folder(&path)),
-                            )
-                        },
+                v_flex()
+                    .gap_0p5()
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(a.filename.clone()),
                     )
                     .child(
-                        btn("open-focused")
-                            .small()
-                            .outline()
-                            .icon(if a.kind == MediaKind::Video {
-                                IconName::Video
-                            } else {
-                                IconName::Image
-                            })
-                            .label(open_label)
-                            .tooltip("Copy to a temporary folder and open with the system app")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_focused();
-                                cx.notify();
-                            })),
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(subtitle.join(" · ")),
                     ),
             )
+            .child(actions)
             .when_some(self.status.clone(), |d, s| d.child(muted(s, &theme)))
+            .child(info_rows(a, self.copied_to(a), &theme, cx))
     }
 }
 
@@ -218,37 +242,43 @@ fn source_label(a: &Asset) -> Option<String> {
     })
 }
 
+/// "Video · 0:12", "Live Photo", "Photo".
+fn kind_label(a: &Asset) -> String {
+    match (a.kind, a.duration_secs) {
+        (MediaKind::Video, Some(s)) => format!("Video · {}:{:02}", s as u64 / 60, s as u64 % 60),
+        (MediaKind::Video, None) => "Video".to_owned(),
+        (MediaKind::Photo, _) if a.live_photo => "Live Photo".to_owned(),
+        (MediaKind::Photo, _) => "Photo".to_owned(),
+    }
+}
+
+/// The item's details in sections: Details, Source, Location and Copy.
 pub(crate) fn info_rows(
     a: &Asset,
     copied_to: Option<String>,
     theme: &Theme,
     cx: &mut Context<MainView>,
 ) -> impl IntoElement {
-    let mut rows: Vec<(&str, String)> = Vec::new();
-
+    let mut details: Vec<(&str, String)> = Vec::new();
     let kind = match (a.kind, a.duration_secs) {
-        (MediaKind::Video, Some(s)) => format!("Video · {}:{:02}", s as u64 / 60, s as u64 % 60),
-        (MediaKind::Video, None) => "Video".to_owned(),
         (MediaKind::Photo, _) if a.live_photo => "Live Photo (saved as a still)".to_owned(),
-        (MediaKind::Photo, _) => "Photo".to_owned(),
+        _ => kind_label(a),
     };
-    rows.push(("Type", kind));
-
+    details.push(("Type", kind));
     if let Some(d) = a.captured_local() {
         let zone = if a.tz_offset_secs.is_some() {
             d.format(" (UTC%:z)").to_string()
         } else {
             String::new()
         };
-        rows.push(("Taken", format!("{}{zone}", d.format("%-d %b %Y %H:%M"))));
+        details.push(("Taken", format!("{}{zone}", d.format("%-d %b %Y %H:%M"))));
     }
     if let (Some(w), Some(h)) = (a.width, a.height) {
-        rows.push(("Size", format!("{w} × {h}")));
+        details.push(("Resolution", format!("{w} × {h}")));
     }
     if let Some(bytes) = a.original_size {
-        rows.push(("File size", human_size(bytes)));
+        details.push(("File size", human_size(bytes)));
     }
-
     let mut flags = Vec::new();
     if a.is_edited() {
         flags.push("Edited");
@@ -260,33 +290,38 @@ pub(crate) fn info_rows(
         flags.push("Hidden");
     }
     if !flags.is_empty() {
-        rows.push(("", flags.join(" · ")));
+        details.push(("Marked", flags.join(" · ")));
     }
+
+    let mut source: Vec<(&str, String)> = Vec::new();
     if let Some(src) = source_label(a) {
-        rows.push(("Source", src));
+        source.push(("App", src));
     }
     // Camera EXIF also on items saved by other apps (e.g. a Nikon photo from Drive).
     if let Some(cam) = &a.camera
         && a.source_app.as_deref() != Some("Camera")
     {
-        rows.push(("Camera", cam.clone()));
+        source.push(("Camera", cam.clone()));
     }
     if let Some(lens) = &a.lens {
-        rows.push(("Lens", lens.clone()));
+        source.push(("Lens", lens.clone()));
     }
     if let Some(exp) = &a.exposure {
-        rows.push(("Exposure", exp.clone()));
-    }
-    if let Some(place) = &a.place {
-        rows.push(("Place", place.clone()));
-    }
-    if let Some((lat, lon)) = a.location {
-        rows.push(("Location", format!("{lat:.5}, {lon:.5}")));
+        source.push(("Exposure", exp.clone()));
     }
     if !a.albums.is_empty() {
-        rows.push(("Albums", a.albums.join(", ")));
+        source.push(("Albums", a.albums.join(", ")));
     }
 
+    let mut location: Vec<(&str, String)> = Vec::new();
+    if let Some(place) = &a.place {
+        location.push(("Place", place.clone()));
+    }
+    if let Some((lat, lon)) = a.location {
+        location.push(("Location", format!("{lat:.5}, {lon:.5}")));
+    }
+
+    let mut copy: Vec<(&str, String)> = Vec::new();
     let saves = if a.trashed {
         "Not copied (in Recently Deleted)".to_owned()
     } else {
@@ -301,61 +336,89 @@ pub(crate) fn info_rows(
         }
         s
     };
-    rows.push(("Saves as", saves));
+    copy.push(("Saves as", saves));
     if !a.trashed {
-        rows.push((
-            "Copied",
-            match copied_to {
-                Some(rel) => format!("Yes · {rel}"),
-                None => "Not yet".to_owned(),
-            },
+        let copied = copied_to.is_some();
+        copy.push((
+            "Status",
+            if copied { "Copied" } else { "Not copied yet" }.to_owned(),
         ));
+        if let Some(rel) = copied_to {
+            copy.push(("Copied to", rel));
+        }
     }
 
     let map_link = a.location.map(|(lat, lon)| google_maps_url(lat, lon));
-    v_flex()
-        .gap_1()
-        .text_sm()
-        .children(rows.into_iter().map(|(k, v)| {
-            // Place and coordinates can be copied (gpui text isn't selectable).
-            let copyable = matches!(k, "Place" | "Location");
-            let text = v.clone();
-            h_flex()
-                .gap_2()
-                .items_start()
-                .child(
-                    div()
-                        .w(px(72.))
-                        .flex_shrink_0()
-                        .text_color(theme.muted_foreground)
-                        .child(k.to_owned()),
+    let copied_green = crate::palette::hsla(crate::palette::COPIED);
+    let row = |k: &'static str, v: String| {
+        // Place and coordinates can be copied (gpui text isn't selectable).
+        let copyable = matches!(k, "Place" | "Location");
+        let text = v.clone();
+        let is_copied = k == "Status" && v == "Copied";
+        h_flex()
+            .gap_2()
+            .items_start()
+            .child(
+                div()
+                    .w(px(76.))
+                    .flex_shrink_0()
+                    .text_color(theme.muted_foreground)
+                    .child(k),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .when(is_copied, |d| d.text_color(copied_green))
+                    .child(v),
+            )
+            .when_some(map_link.clone().filter(|_| k == "Location"), |d, url| {
+                d.child(
+                    btn("open-map")
+                        .xsmall()
+                        .ghost()
+                        .icon(IconName::MapPin)
+                        .tooltip("Open in Google Maps (in your browser)")
+                        .on_click(move |_, _, cx| cx.open_url(&url)),
                 )
-                .child(div().flex_1().min_w_0().child(v))
-                .when_some(map_link.clone().filter(|_| k == "Location"), |d, url| {
-                    d.child(
-                        btn("open-map")
-                            .xsmall()
-                            .ghost()
-                            .icon(IconName::MapPin)
-                            .tooltip("Open in Google Maps (in your browser)")
-                            .on_click(move |_, _, cx| cx.open_url(&url)),
-                    )
-                })
-                .when(copyable, |d| {
-                    d.child(
-                        btn(SharedString::from(format!("copy-{k}")))
-                            .xsmall()
-                            .ghost()
-                            .icon(IconName::Copy)
-                            .tooltip(format!("Copy {}", k.to_lowercase()))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                                this.status = Some("Copied to the clipboard".into());
-                                cx.notify();
-                            })),
-                    )
-                })
-        }))
+            })
+            .when(copyable, |d| {
+                d.child(
+                    btn(SharedString::from(format!("copy-{k}")))
+                        .xsmall()
+                        .ghost()
+                        .icon(IconName::Copy)
+                        .tooltip(format!("Copy {}", k.to_lowercase()))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                            this.status = Some("Copied to the clipboard".into());
+                            cx.notify();
+                        })),
+                )
+            })
+    };
+    let mut sections = Vec::new();
+    for (title, rows) in [
+        ("DETAILS", details),
+        ("SOURCE", source),
+        ("LOCATION", location),
+        ("COPY", copy),
+    ] {
+        if rows.is_empty() {
+            continue;
+        }
+        let body: Vec<_> = rows.into_iter().map(|(k, v)| row(k, v)).collect();
+        sections.push(
+            v_flex()
+                .gap_1()
+                .pt_2()
+                .border_t_1()
+                .border_color(theme.border)
+                .child(section_label(title, theme))
+                .children(body),
+        );
+    }
+    v_flex().gap_3().text_sm().children(sections)
 }
 
 /// A Google Maps link that drops a pin at these coordinates. Opened in the

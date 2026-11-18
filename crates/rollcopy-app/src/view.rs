@@ -222,8 +222,10 @@ pub struct MainView {
     /// Where an item's copy is in the destination (the ✓ badge), by device
     /// path; `None` if it isn't copied. Filled for on-screen tiles.
     pub(crate) in_dest: HashMap<String, Option<PathBuf>>,
-    /// Preview pane shown; opens when an item is selected, × closes it.
+    /// Info pane shown; opens when an item is selected unless the user
+    /// closed it (`info_closed`), which lasts until it's opened again.
     pub(crate) preview_open: bool,
+    pub(crate) info_closed: bool,
     /// "Copies are still running" prompt on window close.
     pub(crate) quit_prompt: bool,
     /// "Copy all N items?" is showing.
@@ -406,6 +408,7 @@ impl MainView {
             config,
             in_dest: HashMap::new(),
             preview_open: false,
+            info_closed: false,
             quit_prompt: false,
             copy_all_prompt: false,
             about_open: false,
@@ -681,8 +684,10 @@ impl Render for MainView {
                 .on_action(cx.listener(|this, _: &ToggleInfo, _, cx| {
                     if this.viewer_open {
                         this.viewer_info = !this.viewer_info;
-                        cx.notify();
+                    } else {
+                        this.set_info_open(!this.preview_open);
                     }
+                    cx.notify();
                 }))
                 .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                     this.search.update(cx, |s, cx| s.focus(window, cx));
