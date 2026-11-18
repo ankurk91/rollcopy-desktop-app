@@ -14,6 +14,7 @@ mod lifecycle;
 mod list;
 mod log;
 mod notify;
+mod palette;
 mod paths;
 mod players;
 mod prefs;

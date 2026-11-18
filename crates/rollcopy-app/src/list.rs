@@ -121,7 +121,7 @@ impl MainView {
                 d.child(
                     Icon::new(IconName::CheckCheck)
                         .small()
-                        .text_color(crate::grid::COPIED_GREEN),
+                        .text_color(crate::palette::hsla(crate::palette::COPIED)),
                 )
             })
             .into_any_element();

@@ -778,7 +778,7 @@ impl MainView {
                         .child(
                             Icon::new(IconName::CheckCheck)
                                 .small()
-                                .text_color(COPIED_GREEN),
+                                .text_color(crate::palette::hsla(crate::palette::COPIED)),
                         ),
                 )
             })
@@ -918,14 +918,6 @@ impl MainView {
         });
     }
 }
-
-/// The "already copied" mark.
-pub(crate) const COPIED_GREEN: Hsla = Hsla {
-    h: 142. / 360.,
-    s: 0.71,
-    l: 0.45,
-    a: 1.,
-};
 
 /// Icon for a type filter chip.
 fn filter_icon(f: Filter) -> IconName {
