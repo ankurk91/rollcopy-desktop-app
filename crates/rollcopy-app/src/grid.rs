@@ -24,7 +24,7 @@ use crate::worker::{Command, ThumbReq, phone_thumb_path};
 /// Thumbnail size the user picks (zoom): the smallest a tile may be; tiles
 /// stretch so each row fills the width. The phone's thumbnails are
 /// 480×360, so tiles past ~300 px would only get blurrier.
-pub(crate) const TILE_DEFAULT: f32 = 132.;
+pub(crate) const TILE_DEFAULT: f32 = 160.;
 pub(crate) const TILE_MIN: f32 = 80.;
 pub(crate) const TILE_MAX: f32 = 300.;
 /// Each zoom step changes the size by this factor.
@@ -49,7 +49,7 @@ pub(crate) fn zoomed(current: f32, steps: i32) -> f32 {
 }
 const GAP: f32 = 8.;
 /// Height of a month heading row.
-const HEADER_H: f32 = 40.;
+const HEADER_H: f32 = 44.;
 pub(crate) const PAD: f32 = 16.;
 /// Room for the scrollbar so the last column never sits under it.
 const SCROLLBAR: f32 = 14.;
@@ -651,14 +651,24 @@ impl MainView {
         let n = end - start;
         h_flex()
             .h(px(HEADER_H))
-            .pt_2()
+            .pt_3()
+            .pb_1()
             .gap_2()
-            .items_center()
-            .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
-            .child(muted(
-                format!("{n} item{}", if n == 1 { "" } else { "s" }),
-                &theme,
-            ))
+            .items_end()
+            .child(
+                div()
+                    .text_base()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .pb(px(1.))
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child(format!("{n} item{}", if n == 1 { "" } else { "s" })),
+            )
+            .child(div().flex_1())
             .child(
                 btn(("select-month", ix))
                     .xsmall()
@@ -709,14 +719,22 @@ impl MainView {
             _ => div().size_full().into_any_element(),
         };
 
-        let badge = |text: String| {
+        // Marks on the photo: small dark discs or pills, the same in both
+        // themes so they read on any picture.
+        let scrim = hsla(0., 0., 0., 0.55);
+        let disc = |id: (&'static str, usize), icon: IconName, color: Hsla, tip: &'static str| {
             div()
-                .px_1()
-                .rounded_sm()
-                .bg(hsla(0., 0., 0., 0.6))
-                .text_color(white())
-                .text_xs()
-                .child(text)
+                .id(id)
+                .size(px(20.))
+                .rounded_full()
+                .bg(scrim)
+                .flex()
+                .items_center()
+                .justify_center()
+                .tooltip(move |window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx)
+                })
+                .child(Icon::new(icon).xsmall().text_color(color))
         };
 
         div()
@@ -724,7 +742,7 @@ impl MainView {
             .size(px(self.tile))
             .flex_shrink_0()
             .relative()
-            .rounded_md()
+            .rounded(px(crate::palette::RADIUS))
             .overflow_hidden()
             .bg(theme.muted)
             .cursor_pointer()
@@ -732,9 +750,12 @@ impl MainView {
             .border_color(if selected {
                 theme.primary
             } else if focused {
-                theme.ring
+                theme.ring.opacity(0.6)
             } else {
                 transparent_black()
+            })
+            .when(!selected && !focused, |d| {
+                d.hover(|s| s.border_color(theme.border))
             })
             .when(a.trashed, |d| d.opacity(0.4))
             .child(image)
@@ -761,11 +782,25 @@ impl MainView {
                 )
             })
             .when(a.kind == MediaKind::Video, |d| {
-                let label = match a.duration_secs {
-                    Some(s) => format!("▶ {}:{:02}", s as u64 / 60, s as u64 % 60),
-                    None => "▶".to_owned(),
-                };
-                d.child(div().absolute().bottom_1().left_1().child(badge(label)))
+                let time = a
+                    .duration_secs
+                    .map(|s| format!("{}:{:02}", s as u64 / 60, s as u64 % 60));
+                d.child(
+                    h_flex()
+                        .absolute()
+                        .bottom_1()
+                        .left_1()
+                        .h(px(20.))
+                        .px_1p5()
+                        .gap_1()
+                        .items_center()
+                        .rounded_full()
+                        .bg(scrim)
+                        .text_color(white())
+                        .text_xs()
+                        .child(Icon::new(IconName::Video).xsmall())
+                        .children(time),
+                )
             })
             .child(
                 h_flex()
@@ -773,51 +808,31 @@ impl MainView {
                     .top_1()
                     .right_1()
                     .gap_1()
-                    .when(a.live_photo, |d| {
-                        d.child(
-                            div()
-                                .id(("live", pos))
-                                .size(px(20.))
-                                .rounded_full()
-                                .bg(hsla(0., 0., 0., 0.55))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .tooltip(|window, cx| {
-                                    gpui_kit::component::tooltip::Tooltip::new("Live Photo")
-                                        .build(window, cx)
-                                })
-                                .child(Icon::new(IconName::CircleDot).xsmall().text_color(white())),
-                        )
+                    .when(a.is_edited(), |d| {
+                        d.child(disc(
+                            ("edited", pos),
+                            IconName::SquarePen,
+                            white(),
+                            "Edited",
+                        ))
                     })
-                    .when(a.is_edited(), |d| d.child(badge("EDITED".into()))),
+                    .when(a.live_photo, |d| {
+                        d.child(disc(
+                            ("live", pos),
+                            IconName::CircleDot,
+                            white(),
+                            "Live Photo",
+                        ))
+                    }),
             )
             // Already in the Save-to folder (from what's on disk, PLAN §7.5).
             .when(self.is_copied(&key), |d| {
-                d.child(
-                    div()
-                        .id(("copied", pos))
-                        .absolute()
-                        .bottom_1()
-                        .right_1()
-                        .size(px(22.))
-                        .rounded_full()
-                        .bg(hsla(0., 0., 0., 0.55))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(
-                                "Copied: already in the Save to folder",
-                            )
-                            .build(window, cx)
-                        })
-                        .child(
-                            Icon::new(IconName::CheckCheck)
-                                .small()
-                                .text_color(crate::palette::hsla(crate::palette::COPIED)),
-                        ),
-                )
+                d.child(div().absolute().bottom_1().right_1().child(disc(
+                    ("copied", pos),
+                    IconName::CheckCheck,
+                    crate::palette::hsla(crate::palette::COPIED),
+                    "Copied: already in the Save to folder",
+                )))
             })
             .when(selected, |d| {
                 d.child(
@@ -828,12 +843,16 @@ impl MainView {
                         .size(px(20.))
                         .rounded_full()
                         .bg(theme.primary)
-                        .text_color(theme.primary_foreground)
-                        .text_xs()
+                        .border_1()
+                        .border_color(white())
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child("✓"),
+                        .child(
+                            Icon::new(IconName::Check)
+                                .xsmall()
+                                .text_color(theme.primary_foreground),
+                        ),
                 )
             })
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
@@ -1101,8 +1120,8 @@ mod tests {
 
     #[test]
     fn zoom_steps_stay_in_range() {
-        assert_eq!(zoomed(TILE_DEFAULT, 1), 158.);
-        assert_eq!(zoomed(TILE_DEFAULT, -1), 110.);
+        assert_eq!(zoomed(TILE_DEFAULT, 1), 192.);
+        assert_eq!(zoomed(TILE_DEFAULT, -1), 133.);
         assert_eq!(zoomed(TILE_DEFAULT, 20), TILE_MAX);
         assert_eq!(zoomed(TILE_DEFAULT, -20), TILE_MIN);
     }
