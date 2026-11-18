@@ -195,7 +195,13 @@ pub async fn scan_dcim(fs: &mut MediaFs) -> Result<Vec<Asset>, DeviceError> {
                 live_stems.insert(stem.to_owned());
                 continue;
             }
-            let st = fs.stat(&format!("/{dir}/{name}")).await?;
+            // Deleted on the phone since the listing: skip it, don't
+            // give up on the whole library (review C11).
+            let st = match fs.stat(&format!("/{dir}/{name}")).await {
+                Ok(st) => st,
+                Err(DeviceError::NotFound(_)) => continue,
+                Err(e) => return Err(e),
+            };
             if st.kind != EntryKind::File {
                 continue;
             }
