@@ -19,6 +19,21 @@ pub fn available(path: &Path) -> Option<u64> {
     }
 }
 
+/// The disk (device id) holding `path`, or its nearest existing parent.
+pub fn device(path: &Path) -> Option<u64> {
+    let existing = path.ancestors().find(|p| p.exists())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        std::fs::metadata(existing).ok().map(|m| m.dev())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = existing;
+        None
+    }
+}
+
 pub fn human(bytes: u64) -> String {
     let b = bytes as f64;
     if b >= 1e9 {

@@ -287,10 +287,10 @@ struct Manager<O: Opener> {
     events: UnboundedSender<QueueEvent>,
     jobs: HashMap<JobId, Job>,
     pending: VecDeque<JobId>,
-    /// Running jobs and the handles that cancel them.
-    /// The task's handle, and the flag that stops its conversion work
-    /// (which runs on a blocking thread and can't be aborted).
-    running: HashMap<JobId, (AbortHandle, rollcopy_convert::Cancel)>,
+    /// Running jobs: the task's handle, the flag that stops its conversion
+    /// work (which runs on a blocking thread and can't be aborted), and the
+    /// space it may still need.
+    running: HashMap<JobId, Running>,
     conflicts: VecDeque<JobId>,
     shown_conflict: Option<JobId>,
     /// "Do this for all": answer for further conflicts until the queue idles.
@@ -409,9 +409,9 @@ impl<O: Opener> Manager<O> {
         }
         // Stop ffmpeg / the HEIC encoder first, then drop the task, which
         // removes its temporary files (audit NEW-03).
-        if let Some((handle, cancel)) = self.running.remove(&id) {
-            cancel.cancel();
-            handle.abort();
+        if let Some(r) = self.running.remove(&id) {
+            r.cancel.cancel();
+            r.abort.abort();
         }
         self.pending.retain(|p| *p != id);
         self.conflicts.retain(|c| *c != id);
@@ -665,15 +665,38 @@ impl<O: Opener> Manager<O> {
                 }
             }
 
-            // Enough room for this item? (audit REL-06)
-            if let Some(problem) = space_problem(&job.dest, &self.staging_dir, &job.asset) {
-                self.pending.push_front(id);
-                self.space_paused = Some(problem);
-                self.emit(QueueEvent::Paused {
-                    reason: self.pause_reason(),
-                });
-                break;
+            // Enough room for this item, next to what the running ones
+            // still need? (audit REL-06, review C7)
+            let need = Need::of(&job.asset);
+            let running: Vec<(&Path, Need)> = self
+                .running
+                .values()
+                .map(|r| (r.dest.as_path(), r.need))
+                .collect();
+            match space_check(
+                (&job.dest, &self.staging_dir),
+                need,
+                &running,
+                crate::space::available,
+                crate::space::device,
+            ) {
+                Space::Enough => {}
+                // Fits once the running copies are done; dispatch runs
+                // again when one finishes.
+                Space::AfterRunning => {
+                    self.pending.push_front(id);
+                    break;
+                }
+                Space::Short(problem) => {
+                    self.pending.push_front(id);
+                    self.space_paused = Some(problem);
+                    self.emit(QueueEvent::Paused {
+                        reason: self.pause_reason(),
+                    });
+                    break;
+                }
             }
+            let dest = job.dest.clone();
 
             let cancel = rollcopy_convert::Cancel::new();
             let spec = JobSpec {
@@ -722,7 +745,15 @@ impl<O: Opener> Manager<O> {
                 let conn = result.is_ok().then_some((udid, fs));
                 let _ = done_tx.send(Done { id, result, conn });
             });
-            self.running.insert(id, (task.abort_handle(), cancel));
+            self.running.insert(
+                id,
+                Running {
+                    abort: task.abort_handle(),
+                    cancel,
+                    dest,
+                    need,
+                },
+            );
         }
     }
 
@@ -846,6 +877,124 @@ impl<O: Opener> Manager<O> {
 /// Space kept free on any disk Rollcopy writes to.
 const SPACE_MARGIN: u64 = 64 * 1024 * 1024;
 
+/// A running job (see `Manager::running`).
+struct Running {
+    abort: AbortHandle,
+    cancel: rollcopy_convert::Cancel,
+    dest: PathBuf,
+    need: Need,
+}
+
+/// Bytes a job writes: next to its destination (the output, plus the
+/// original's size again while converting) and in staging (the original,
+/// when converting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Need {
+    dest: u64,
+    staging: u64,
+}
+
+impl Need {
+    fn of(asset: &Asset) -> Self {
+        let size = asset.original_size.unwrap_or(0);
+        let converts = asset.save_plan().converts();
+        Need {
+            dest: size.saturating_mul(if converts { 2 } else { 1 }),
+            staging: if converts { size } else { 0 },
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum Space {
+    Enough,
+    /// Fits on its own, but not next to what running jobs may still write.
+    AfterRunning,
+    /// Doesn't fit even alone: pause with this message.
+    Short(String),
+}
+
+/// One disk's share in [`space_check`].
+struct Disk<'a> {
+    dev: Option<u64>,
+    dir: &'a Path,
+    own: u64,
+    theirs: u64,
+    is_dest: bool,
+}
+
+/// Whether a job writing to `(dest, staging)` fits now. Staging and the
+/// destination count against one budget when they're on the same disk, and
+/// the running jobs' needs (`running`: their destinations; their staging
+/// is the same `staging`) are set aside first (review C7). Those are
+/// counted in full, though they're partly written already, so a job that
+/// would only fit by that slack waits for them instead of pausing the
+/// queue as "disk full". `available` and `device` are passed in for tests.
+fn space_check(
+    (dest, staging): (&Path, &Path),
+    need: Need,
+    running: &[(&Path, Need)],
+    available: impl Fn(&Path) -> Option<u64>,
+    device: impl Fn(&Path) -> Option<u64>,
+) -> Space {
+    let mut disks: Vec<Disk<'_>> = Vec::new();
+    let mut add = |dir, own, theirs, is_dest| {
+        let dev = device(dir);
+        match disks.iter_mut().find(|d| dev.is_some() && d.dev == dev) {
+            Some(d) => {
+                d.own += own;
+                d.theirs += theirs;
+                d.is_dest |= is_dest;
+            }
+            None => disks.push(Disk {
+                dev,
+                dir,
+                own,
+                theirs,
+                is_dest,
+            }),
+        }
+    };
+    add(dest, need.dest, 0, true);
+    add(staging, need.staging, 0, false);
+    for (d, n) in running {
+        add(d, 0, n.dest, false);
+        add(staging, 0, n.staging, false);
+    }
+    let mut wait = false;
+    for d in disks {
+        if d.own == 0 {
+            continue;
+        }
+        let Some(free) = available(d.dir) else {
+            continue;
+        };
+        let alone = d.own + SPACE_MARGIN;
+        if free < alone {
+            return Space::Short(if d.is_dest {
+                format!(
+                    "The destination disk is full. Free up {} or choose another folder, then Resume",
+                    crate::space::human(alone)
+                )
+            } else {
+                format!(
+                    "Not enough space in Rollcopy's cache ({}). Free up {}, then Resume",
+                    d.dir.display(),
+                    crate::space::human(alone)
+                )
+            });
+        }
+        if free < alone + d.theirs {
+            wait = true;
+        }
+    }
+    if wait {
+        Space::AfterRunning
+    } else {
+        Space::Enough
+    }
+}
+
 /// Why `asset` can't be written now for lack of space, if so. The
 /// destination needs room for the output plus its temporary file; staging
 /// needs room for the original when converting.
@@ -869,4 +1018,58 @@ fn space_problem(dest: &Path, staging: &Path, asset: &Asset) -> Option<String> {
         ));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Need, SPACE_MARGIN, Space, space_check};
+    use std::path::Path;
+
+    const GB: u64 = 1_000_000_000;
+
+    fn copy(bytes: u64) -> Need {
+        Need {
+            dest: bytes,
+            staging: 0,
+        }
+    }
+
+    /// Converting needs room at the destination and in staging; on one
+    /// disk that's one budget (review C7).
+    #[test]
+    fn staging_and_destination_share_one_disk() {
+        let need = Need {
+            dest: 3 * GB,
+            staging: 3 * GB / 2,
+        };
+        let dirs = (Path::new("/d"), Path::new("/s"));
+        let free = |_: &Path| Some(4 * GB);
+        let one_disk = space_check(dirs, need, &[], free, |_| Some(1));
+        assert!(
+            matches!(one_disk, Space::Short(ref m) if m.contains("destination")),
+            "{one_disk:?}"
+        );
+        let two_disks = space_check(dirs, need, &[], free, |p| {
+            Some(if p == Path::new("/d") { 1 } else { 2 })
+        });
+        assert_eq!(two_disks, Space::Enough);
+    }
+
+    /// Two big copies on one disk: the second waits for the first instead
+    /// of both starting, and a real shortage still pauses (review C7).
+    #[test]
+    fn running_jobs_are_counted() {
+        let dirs = (Path::new("/d/2026/11/videos"), Path::new("/s"));
+        let running = [(Path::new("/d/2026/10/videos"), copy(3 * GB))];
+        let check =
+            |free: u64| space_check(dirs, copy(3 * GB), &running, |_| Some(free), |_| Some(1));
+        assert_eq!(check(7 * GB), Space::Enough);
+        assert_eq!(check(5 * GB), Space::AfterRunning);
+        assert!(matches!(check(3 * GB + SPACE_MARGIN - 1), Space::Short(_)));
+        // Nothing running: just the job's own need.
+        assert_eq!(
+            space_check(dirs, copy(3 * GB), &[], |_| Some(5 * GB), |_| Some(1)),
+            Space::Enough
+        );
+    }
 }
