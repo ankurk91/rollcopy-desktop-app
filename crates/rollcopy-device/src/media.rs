@@ -25,6 +25,22 @@ async fn deadline<T>(
     }
 }
 
+/// Closes an AFC file after `result`, on success and on failure alike: the
+/// handle has no drop that closes it, and on the long-lived thumbnail and
+/// viewer connections a failed read left it open on the phone (review R4).
+/// Not when the link dropped or timed out: then the connection is thrown
+/// away anyway, and closing would only wait another 30 s.
+async fn finish<T>(result: Result<T>, close: impl Future<Output = Result<()>>) -> Result<T> {
+    match result {
+        Err(e @ DeviceError::Disconnected(_)) => Err(e),
+        Err(e) => {
+            let _ = close.await;
+            Err(e)
+        }
+        Ok(v) => close.await.map(|()| v),
+    }
+}
+
 /// [`deadline`], then a not-found answer names `path`.
 async fn deadline_at<T>(
     what: &str,
@@ -158,9 +174,8 @@ impl MediaFs {
     /// metadata); use [`MediaFs::copy_to_local`] for media.
     pub async fn read(&mut self, path: &str) -> Result<Vec<u8>> {
         let mut f = deadline_at("open", path, self.afc.open(path, AfcFopenMode::RdOnly)).await?;
-        let data = deadline("read", f.read_entire()).await?;
-        deadline("close", f.close()).await?;
-        Ok(data)
+        let data = deadline("read", f.read_entire()).await;
+        finish(data, deadline("close", f.close())).await
     }
 
     /// Streams a device file to `dest` on the laptop, calling `progress` with
@@ -176,20 +191,51 @@ impl MediaFs {
             Err(DeviceError::NotFound(_)) => return Err(DeviceError::NotFound(path.to_owned())),
             other => other?,
         };
-        let mut out = tokio::fs::File::create(dest).await?;
-        let mut total = 0u64;
-        loop {
-            let chunk = deadline("read", f.read_n(READ_CHUNK)).await?;
-            if chunk.is_empty() {
-                break;
+        let copied = async {
+            let mut out = tokio::fs::File::create(dest).await?;
+            let mut total = 0u64;
+            loop {
+                let chunk = deadline("read", f.read_n(READ_CHUNK)).await?;
+                if chunk.is_empty() {
+                    break;
+                }
+                out.write_all(&chunk).await?;
+                total += chunk.len() as u64;
+                progress(total);
             }
-            out.write_all(&chunk).await?;
-            total += chunk.len() as u64;
-            progress(total);
+            out.flush().await?;
+            out.sync_all().await?;
+            Ok(total)
         }
-        out.flush().await?;
-        out.sync_all().await?;
-        deadline("close", f.close()).await?;
-        Ok(total)
+        .await;
+        finish(copied, deadline("close", f.close())).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DeviceError, finish};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// Review R4: the file is closed after success and after an ordinary
+    /// failure, but not after the link dropped.
+    #[tokio::test]
+    async fn closes_unless_the_link_dropped() {
+        let closed = AtomicBool::new(false);
+        let close = || async {
+            closed.store(true, Ordering::SeqCst);
+            Ok(())
+        };
+
+        assert_eq!(finish(Ok(5), close()).await.unwrap(), 5);
+        assert!(closed.swap(false, Ordering::SeqCst));
+
+        let r = finish::<u8>(Err(DeviceError::Other("bad read".into())), close()).await;
+        assert!(matches!(r, Err(DeviceError::Other(_))));
+        assert!(closed.swap(false, Ordering::SeqCst));
+
+        let r = finish::<u8>(Err(DeviceError::Disconnected("timed out".into())), close()).await;
+        assert!(matches!(r, Err(DeviceError::Disconnected(_))));
+        assert!(!closed.load(Ordering::SeqCst));
     }
 }
