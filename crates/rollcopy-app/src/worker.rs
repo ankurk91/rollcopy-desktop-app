@@ -241,11 +241,12 @@ pub fn spawn(paths: CachePaths) -> Worker {
                 start_tray(tray_rx, ev_tx.clone());
                 let queue = start_queue(&paths, ev_tx.clone());
                 let loads = Loader::default();
+                let (rest_tx, rest_rx) = async_channel::unbounded();
+                tokio::spawn(route_commands(cmd_rx, queue.clone(), rest_tx));
                 tokio::spawn(serve_commands(
-                    cmd_rx,
+                    rest_rx,
                     ev_tx.clone(),
                     paths.clone(),
-                    queue.clone(),
                     loads.clone(),
                 ));
                 run_watch(ev_tx, paths, queue, loads).await;
@@ -396,11 +397,30 @@ async fn connect<'a>(
     }
 }
 
+/// Hands queue commands (Pause, Cancel, …) to the queue at once and
+/// passes the rest on. They used to wait in `serve_commands` behind a
+/// thumbnail fetch, which on a stalled phone takes up to 45 s (review P1).
+async fn route_commands(
+    rx: async_channel::Receiver<Command>,
+    transfers: QueueHandle,
+    rest: async_channel::Sender<Command>,
+) {
+    while let Ok(cmd) = rx.recv().await {
+        match cmd {
+            Command::Queue(cmd) => transfers.send(cmd),
+            other => {
+                if rest.send(other).await.is_err() {
+                    return;
+                }
+            }
+        }
+    }
+}
+
 async fn serve_commands(
     rx: async_channel::Receiver<Command>,
     tx: async_channel::Sender<Event>,
     paths: CachePaths,
-    transfers: QueueHandle,
     loads: Loader,
 ) {
     // Thumbnail queue, newest first; `queued` de-duplicates keys.
@@ -425,7 +445,8 @@ async fn serve_commands(
 
         for cmd in incoming {
             match cmd {
-                Command::Queue(cmd) => transfers.send(cmd),
+                // Handled by `route_commands`.
+                Command::Queue(_) => {}
                 Command::Reload { udid } => {
                     // Thumbnails of the old list may be gone; the UI asks
                     // again for what is on screen.
