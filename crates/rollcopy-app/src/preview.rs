@@ -185,8 +185,7 @@ impl MainView {
                         .small()
                         .ghost()
                         .icon(IconName::FolderOpen)
-                        .label("Show in folder")
-                        .tooltip("Show the copy in the file manager")
+                        .tooltip("Show in folder")
                         .on_click(move |_, _, _| crate::desktop::show_in_folder(&path)),
                 )
             });

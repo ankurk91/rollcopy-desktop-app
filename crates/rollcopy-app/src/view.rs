@@ -290,8 +290,7 @@ impl MainView {
         });
         // Preferences changed (here or in the Preferences window): apply them.
         let search = cx.new(|cx| {
-            gpui_kit::component::input::InputState::new(window, cx)
-                .placeholder("Search (Ctrl+F)")
+            gpui_kit::component::input::InputState::new(window, cx).placeholder("Search (Ctrl+F)")
         });
         let searched = cx.subscribe_in(
             &search,

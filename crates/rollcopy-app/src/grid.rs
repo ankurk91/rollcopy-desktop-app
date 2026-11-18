@@ -50,9 +50,9 @@ pub(crate) fn zoomed(current: f32, steps: i32) -> f32 {
 const GAP: f32 = 8.;
 /// Height of a month heading row.
 const HEADER_H: f32 = 44.;
+/// Side padding of the grid. The scrollbar (16 px) draws over the right
+/// one, so the last column never sits under it and no extra room is kept.
 pub(crate) const PAD: f32 = 16.;
-/// Room for the scrollbar so the last column never sits under it.
-const SCROLLBAR: f32 = 14.;
 
 impl MainView {
     /// Tiles per row for the current window width.
@@ -65,10 +65,7 @@ impl MainView {
         } else {
             0.
         };
-        layout(
-            width - LEFT_W - preview - 2. * PAD - SCROLLBAR,
-            self.tile_target,
-        )
+        layout(width - LEFT_W - preview - 2. * PAD, self.tile_target)
     }
 
     /// Changes the thumbnail size by `steps` (0 = back to the default),

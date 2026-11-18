@@ -824,7 +824,12 @@ impl MainView {
             );
             // Column headings: same widths as the rows below.
             let shown = TRANSFERS.fit(&t.widths, t.row_w);
-            panel = panel.child(
+            // The list sits on the content shade, below the darker bar.
+            let mut list = v_flex()
+                .bg(theme.background)
+                .border_t_1()
+                .border_color(theme.border);
+            list = list.child(
                 div().px_4().child(
                     TRANSFERS
                         .row(
@@ -845,7 +850,7 @@ impl MainView {
                         )),
                 ),
             );
-            panel = panel.child(
+            list = list.child(
                 div()
                     .relative()
                     .h(px(t.height))
@@ -866,6 +871,7 @@ impl MainView {
                     )
                     .vertical_scrollbar(&t.scroll),
             );
+            panel = panel.child(list);
         }
         Some(panel.into_any_element())
     }
