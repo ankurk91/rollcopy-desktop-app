@@ -133,13 +133,25 @@ impl Target {
     }
 }
 
+/// Most `… (n)` names tried for one item before giving up.
+const MAX_CANDIDATES: u32 = 10_000;
+
 /// Picks the destination for `a`. It's the first name in [`dest_path`],
 /// `… (2)`, `… (3)`, … that holds this asset's earlier copy, or else the
 /// first free one. Files that aren't a copy of `a` are never chosen, so they
 /// are never overwritten. `taken` marks paths other queued items will write.
-pub fn resolve_dest(settings: &Settings, a: &Asset, taken: impl Fn(&Path) -> bool) -> Target {
+///
+/// Fails when a name can't be checked for any reason but "not there": a
+/// file where a folder should be, no permission, or a share that went
+/// away fail the same way for every name, so trying the next would never
+/// end. Also fails after [`MAX_CANDIDATES`] names.
+pub fn resolve_dest(
+    settings: &Settings,
+    a: &Asset,
+    taken: impl Fn(&Path) -> bool,
+) -> std::io::Result<Target> {
     let base = dest_path(settings, a);
-    for n in 1.. {
+    for n in 1..=MAX_CANDIDATES {
         let path = candidate(&base, n);
         if taken(&path) {
             continue;
@@ -147,23 +159,32 @@ pub fn resolve_dest(settings: &Settings, a: &Asset, taken: impl Fn(&Path) -> boo
         match std::fs::metadata(&path) {
             Ok(m) => {
                 if m.modified().is_ok_and(|t| is_copy_of(t, a)) {
-                    return Target::Copied(path);
+                    return Ok(Target::Copied(path));
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Target::Free(path),
-            // Unreadable: leave it alone and try the next name.
-            Err(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Target::Free(path)),
+            Err(e) => {
+                let folder = path.parent().unwrap_or(&path);
+                return Err(std::io::Error::new(
+                    e.kind(),
+                    format!("can't use the folder {}: {e}", folder.display()),
+                ));
+            }
         }
     }
-    unreachable!("ran out of candidate names")
+    Err(std::io::Error::other(format!(
+        "no free file name for {} after {MAX_CANDIDATES} tries",
+        base.display()
+    )))
 }
 
 /// Where this asset's earlier copy is, if it was copied. Stops at the first
-/// name with nothing there.
+/// name with nothing there; a folder that can't be read counts as not
+/// copied.
 pub fn find_copy(settings: &Settings, a: &Asset) -> Option<PathBuf> {
     match resolve_dest(settings, a, |_| false) {
-        Target::Copied(p) => Some(p),
-        Target::Free(_) => None,
+        Ok(Target::Copied(p)) => Some(p),
+        Ok(Target::Free(_)) | Err(_) => None,
     }
 }
 
@@ -214,6 +235,39 @@ mod tests {
             .unwrap();
     }
 
+    /// A file where the year folder should be makes every name fail the
+    /// same way: give up at once instead of trying names forever.
+    #[test]
+    fn unusable_folder_fails_fast() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dated("DCIM/100APPLE", "IMG_0057.JPG", 1_700_000_000);
+        let s = Settings::new(dir.path().to_path_buf());
+        let year = dest_path(&s, &a)
+            .strip_prefix(dir.path())
+            .unwrap()
+            .components()
+            .next()
+            .unwrap()
+            .as_os_str()
+            .to_owned();
+        std::fs::write(dir.path().join(&year), b"not a folder").unwrap();
+        let started = std::time::Instant::now();
+        let err = resolve_dest(&s, &a, |_| false).unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(err.to_string().contains("can't use the folder"), "{err}");
+        assert_eq!(find_copy(&s, &a), None);
+    }
+
+    /// Every name taken by other queued items: an error, not a hang.
+    #[test]
+    fn gives_up_after_the_last_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dated("DCIM/100APPLE", "IMG_0057.JPG", 1_700_000_000);
+        let s = Settings::new(dir.path().to_path_buf());
+        let err = resolve_dest(&s, &a, |_| true).unwrap_err();
+        assert!(err.to_string().contains("no free file name"), "{err}");
+    }
+
     #[test]
     fn candidates() {
         let base = Path::new("/d/IMG_0057.JPG");
@@ -251,12 +305,12 @@ mod tests {
 
             // Nothing copied yet.
             assert_eq!(
-                resolve_dest(&s, &first, |_| false),
+                resolve_dest(&s, &first, |_| false).unwrap(),
                 Target::Free(base.clone())
             );
             assert_eq!(find_copy(&s, &second), None);
             // Queued together: the second avoids the first's reservation.
-            let t = resolve_dest(&s, &second, |p| p == base);
+            let t = resolve_dest(&s, &second, |p| p == base).unwrap();
             assert_eq!(t, Target::Free(candidate(&base, 2)));
 
             // After only the first is copied, the second is still not copied
@@ -265,13 +319,13 @@ mod tests {
             assert_eq!(find_copy(&s, &first), Some(base.clone()));
             assert_eq!(find_copy(&s, &second), None);
             assert_eq!(
-                resolve_dest(&s, &second, |_| false),
+                resolve_dest(&s, &second, |_| false).unwrap(),
                 Target::Free(candidate(&base, 2))
             );
             touch(&candidate(&base, 2), &second);
             assert_eq!(find_copy(&s, &second), Some(candidate(&base, 2)));
             assert_eq!(
-                resolve_dest(&s, &first, |_| false),
+                resolve_dest(&s, &first, |_| false).unwrap(),
                 Target::Copied(base.clone())
             );
         }
@@ -287,7 +341,7 @@ mod tests {
         std::fs::write(&base, b"someone else's").unwrap();
         assert_eq!(find_copy(&s, &a), None);
         assert_eq!(
-            resolve_dest(&s, &a, |_| false),
+            resolve_dest(&s, &a, |_| false).unwrap(),
             Target::Free(candidate(&base, 2))
         );
     }

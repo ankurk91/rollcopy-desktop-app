@@ -534,9 +534,11 @@ impl<O: Opener> Manager<O> {
             let id = self.next_id;
             self.next_id += 1;
             let reserved = &self.reserved;
+            // If the folder can't be checked now, the job fails when it
+            // starts and checks again (`dispatch`).
             let dest = resolve_dest(&self.settings, &asset, |p| reserved.contains_key(p))
-                .path()
-                .to_path_buf();
+                .map(|t| t.path().to_path_buf())
+                .unwrap_or_else(|_| crate::layout::dest_path(&self.settings, &asset));
             self.reserved.insert(dest.clone(), id);
             let name = dest
                 .file_name()
@@ -618,9 +620,16 @@ impl<O: Opener> Manager<O> {
             // Only this item's own earlier copy is a conflict (PLAN §7.5);
             // anything else there makes it pick the next free name.
             let reserved = &self.reserved;
-            let target = resolve_dest(&job.settings, &job.asset, |p| {
+            let target = match resolve_dest(&job.settings, &job.asset, |p| {
                 reserved.get(p).is_some_and(|other| *other != id)
-            });
+            }) {
+                Ok(t) => t,
+                Err(e) => {
+                    // Not reachable or not a folder: retrying won't help.
+                    self.record_failure(id, Stage::Write, e.to_string());
+                    continue;
+                }
+            };
             if target.path() != job.dest {
                 if self.reserved.get(&job.dest) == Some(&id) {
                     self.reserved.remove(&job.dest);
@@ -770,21 +779,29 @@ impl<O: Opener> Manager<O> {
                     self.pending.push_back(id);
                     return;
                 }
-                let record = FailureRecord {
-                    time: chrono::Local::now().to_rfc3339(),
-                    udid: job.udid.clone(),
-                    source: job.asset.save_plan().source,
-                    dest: job.dest.display().to_string(),
-                    stage: stage.as_str().to_owned(),
-                    error: error.clone(),
-                    retries: job.attempts - 1,
-                };
-                if let Some(h) = &self.history {
-                    let _ = h.record(&record);
-                }
-                self.set_state(id, JobState::Failed { stage, error });
+                self.record_failure(id, stage, error);
             }
         }
+    }
+
+    /// Saves the failure in the history and marks the job failed.
+    fn record_failure(&mut self, id: JobId, stage: Stage, error: String) {
+        let Some(job) = self.jobs.get(&id) else {
+            return;
+        };
+        let record = FailureRecord {
+            time: chrono::Local::now().to_rfc3339(),
+            udid: job.udid.clone(),
+            source: job.asset.save_plan().source,
+            dest: job.dest.display().to_string(),
+            stage: stage.as_str().to_owned(),
+            error: error.clone(),
+            retries: job.attempts.saturating_sub(1),
+        };
+        if let Some(h) = &self.history {
+            let _ = h.record(&record);
+        }
+        self.set_state(id, JobState::Failed { stage, error });
     }
 
     /// Emits the first waiting conflict once, so the UI shows one dialog at a time.

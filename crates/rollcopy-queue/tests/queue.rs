@@ -13,7 +13,7 @@ use rollcopy_device::{DeviceError, EntryKind, MediaRead, Stat};
 use rollcopy_library::{Asset, MediaKind};
 use rollcopy_queue::{
     ConflictPolicy, JobId, JobState, Layout, Opener, QueueCommand, QueueEvent, QueueHandle,
-    Settings,
+    Settings, Stage,
 };
 use tokio::sync::mpsc;
 
@@ -211,6 +211,37 @@ async fn same_name_photos_are_both_copied() {
             .count();
         assert_eq!(leftovers, 0);
     }
+}
+
+/// A file where a year folder should be (or an unreachable share) fails
+/// that item at once instead of hanging the queue; other items still copy.
+#[tokio::test]
+async fn unusable_destination_folder_fails_the_item() {
+    let dest = tempfile::tempdir().unwrap();
+    let s = Settings::new(dest.path().to_path_buf());
+    // 1_700_000_000 is November 2023; 1_600_000_000 is September 2020.
+    std::fs::write(dest.path().join("2023"), b"not a folder").unwrap();
+    let phone = FakePhone::with(&[
+        ("/DCIM/100APPLE/IMG_0001.JPG", b"blocked"),
+        ("/DCIM/100APPLE/IMG_0002.JPG", b"fine"),
+    ]);
+    let mut h = Harness::start(phone, s);
+    h.add(vec![
+        photo("DCIM/100APPLE", "IMG_0001.JPG", 1_700_000_000),
+        photo("DCIM/100APPLE", "IMG_0002.JPG", 1_600_000_000),
+    ]);
+    let done = h.finish(2).await;
+    let (failed, ok): (Vec<_>, Vec<_>) = done
+        .into_values()
+        .partition(|(state, _)| matches!(state, JobState::Failed { .. }));
+    assert_eq!((failed.len(), ok.len()), (1, 1), "{failed:?} {ok:?}");
+    let JobState::Failed { stage, error } = &failed[0].0 else {
+        unreachable!()
+    };
+    assert_eq!(*stage, Stage::Write);
+    assert!(error.contains("can't use the folder"), "{error}");
+    assert_eq!(ok[0].0, JobState::Done);
+    assert_eq!(std::fs::read(&ok[0].1).unwrap(), b"fine");
 }
 
 /// A file from another tool at the target path survives every policy.
