@@ -48,3 +48,40 @@ fn remux_keeps_length_and_streams() {
     assert!(out.has_audio);
     assert_eq!((out.width, out.height), (320, 240));
 }
+
+/// A second audio track an MP4 can't hold (like the APAC Spatial Audio
+/// track of iPhone 16 and later; here QuickTime ADPCM, which ffmpeg can
+/// make) used to fail the whole remux. Now it's left out and the AAC
+/// track is kept, in both modes.
+#[test]
+fn extra_audio_track_mp4_cant_hold_is_dropped() {
+    if !ffmpeg_available() {
+        eprintln!("ffmpeg not installed; skipping");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("IMG_0002.MOV");
+    let ok = Command::new("ffmpeg")
+        .args(["-nostdin", "-v", "error", "-y"])
+        .args(["-f", "lavfi", "-i", "testsrc=duration=1:size=64x64:rate=10"])
+        .args(["-f", "lavfi", "-i", "sine=duration=1"])
+        .args(["-f", "lavfi", "-i", "sine=frequency=600:duration=1"])
+        .args(["-map", "0", "-map", "1", "-map", "2"])
+        .args(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+        .args(["-c:a:0", "aac", "-c:a:1", "adpcm_ima_qt"])
+        .arg(&src)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "couldn't generate the test clip");
+    let source = probe(&src).unwrap();
+    assert_eq!(source.audio_streams, vec![1]);
+
+    for mode in [VideoMode::Remux, VideoMode::H264] {
+        let dst = dir.path().join(format!(".rollcopy-1-1-{mode:?}.part"));
+        to_mp4(&src, &dst, mode).unwrap_or_else(|e| panic!("{mode:?}: {e}"));
+        let out = verify_mp4(&dst, source.duration_secs).unwrap();
+        assert!(out.has_audio, "{mode:?}");
+        assert_eq!(out.audio_streams.len(), 1, "{mode:?}");
+    }
+}

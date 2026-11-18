@@ -32,7 +32,17 @@ pub struct VideoInfo {
     /// HLG or PQ transfer.
     pub hdr: bool,
     pub has_audio: bool,
+    /// Indexes of the audio streams an MP4 can hold as they are (see
+    /// [`MP4_AUDIO`]); others are left out of the copy.
+    pub audio_streams: Vec<usize>,
 }
+
+/// Audio codecs that go into an MP4 unchanged. iPhone 16 and later record
+/// Spatial Audio as a stereo AAC track plus an APAC track; ffmpeg can't
+/// decode APAC or put it in an MP4, so mapping every audio track failed
+/// the whole video (review C2, 2026-11-18). Only the tracks named here are
+/// kept.
+const MP4_AUDIO: &[&str] = &["aac", "alac", "mp3", "ac3", "eac3", "opus", "flac"];
 
 /// SDR conversion that gave correct colours for iPhone HLG video (2026-11-12).
 const TONEMAP: &str = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,\
@@ -152,7 +162,7 @@ pub fn probe(path: &Path) -> Result<VideoInfo, ConvertError> {
     let out = run(
         Command::new("ffprobe")
             .args(["-v", "error", "-show_entries"])
-            .arg("format=duration:stream=codec_type,codec_name,width,height,color_transfer")
+            .arg("format=duration:stream=index,codec_type,codec_name,width,height,color_transfer")
             .args(["-of", "flat"])
             .arg(path),
         "ffprobe",
@@ -183,6 +193,15 @@ fn parse_probe(out: &str) -> Result<VideoInfo, ConvertError> {
     info.has_audio = streams
         .values()
         .any(|s| s.get("codec_type") == Some(&"audio"));
+    info.audio_streams = streams
+        .iter()
+        .filter(|(_, s)| {
+            s.get("codec_type") == Some(&"audio")
+                && s.get("codec_name").is_some_and(|c| MP4_AUDIO.contains(c))
+        })
+        // The stream's own index; the position in the output if missing.
+        .map(|(pos, s)| s.get("index").and_then(|i| i.parse().ok()).unwrap_or(*pos))
+        .collect();
     let video = streams
         .values()
         .find(|s| s.get("codec_type") == Some(&"video"))
@@ -259,10 +278,12 @@ fn run_remux(
     cancel: &Cancel,
 ) -> Result<(), ConvertError> {
     let mut cmd = ffmpeg();
-    cmd.arg("-i")
-        .arg(src)
-        .args(["-map", "0:v:0", "-map", "0:a?", "-map_metadata", "0"])
-        .args(["-c", "copy"]);
+    cmd.arg("-i").arg(src).args(["-map", "0:v:0"]);
+    // Every audio track an MP4 can hold, as it is.
+    for idx in &info.audio_streams {
+        cmd.arg("-map").arg(format!("0:{idx}"));
+    }
+    cmd.args(["-map_metadata", "0", "-c", "copy"]);
     // Apple players need `hvc1`, not `hev1`, for HEVC in MP4.
     match info.codec.as_str() {
         "hevc" => cmd.args(["-tag:v", "hvc1"]),
@@ -303,9 +324,12 @@ fn run_h264(
             .arg(format!("vaapi=va:{}", device.display()))
             .args(["-filter_hw_device", "va"]);
     }
-    cmd.arg("-i")
-        .arg(src)
-        .args(["-map", "0:v:0", "-map", "0:a?", "-map_metadata", "0"]);
+    cmd.arg("-i").arg(src).args(["-map", "0:v:0"]);
+    // One audio track, re-encoded to AAC: the first one ffmpeg can read.
+    if let Some(idx) = info.audio_streams.first() {
+        cmd.arg("-map").arg(format!("0:{idx}"));
+    }
+    cmd.args(["-map_metadata", "0"]);
     match (&enc, info.hdr) {
         (Encoder::Cpu, true) => {
             cmd.args(["-vf", TONEMAP]);
@@ -581,10 +605,35 @@ streams.stream.2.codec_type="data"
 format.duration="15.335000"
 "#;
         let i = parse_probe(out).unwrap();
+        assert_eq!(i.audio_streams, vec![1]);
         assert_eq!(i.codec, "hevc");
         assert_eq!((i.width, i.height), (1920, 1080));
         assert!(i.hdr && i.has_audio);
         assert!((i.duration_secs - 15.335).abs() < 1e-9);
         assert!(parse_probe("format.duration=\"1\"\n").is_err());
+    }
+
+    /// Spatial Audio: AAC plus an APAC track ffmpeg doesn't know (no
+    /// codec name). Only the AAC track is kept.
+    #[test]
+    fn unsupported_audio_tracks_are_left_out() {
+        let out = r#"streams.stream.0.index=0
+streams.stream.0.codec_name="hevc"
+streams.stream.0.codec_type="video"
+streams.stream.1.index=1
+streams.stream.1.codec_name="aac"
+streams.stream.1.codec_type="audio"
+streams.stream.2.index=2
+streams.stream.2.codec_type="audio"
+streams.stream.3.index=3
+streams.stream.3.codec_name="apac"
+streams.stream.3.codec_type="audio"
+streams.stream.4.index=4
+streams.stream.4.codec_type="data"
+format.duration="3.0"
+"#;
+        let i = parse_probe(out).unwrap();
+        assert!(i.has_audio);
+        assert_eq!(i.audio_streams, vec![1]);
     }
 }

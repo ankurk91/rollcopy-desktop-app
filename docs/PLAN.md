@@ -237,7 +237,7 @@ These are the rules proven in the manual transfer, turned into code.
 1. **Pick the source.** Use the edited version (`FullSizeRender.*`) if it exists, otherwise the original.
 2. **Convert to compatible formats** (`rollcopy-convert`; checked on real files 2026-11-12):
    - HEIC → JPG keeps the Display P3 ICC profile, Make/Model, the capture time with its offset, and GPS. The pixels are rotated by libheif, so the EXIF orientation is reset to 1. A 12 MP photo takes about 2.6 s in a debug build.
-   - MOV → MP4 keeps creation time, GPS and Make, maps only video and audio (iPhone MOVs carry five Apple data tracks), tags HEVC as `hvc1`, and drops the Dolby Vision box, leaving plain HLG.
+   - MOV → MP4 keeps creation time, GPS and Make, maps only video and audio (iPhone MOVs carry five Apple data tracks), tags HEVC as `hvc1`, and drops the Dolby Vision box, leaving plain HLG. Only audio tracks an MP4 can hold are kept (AAC, ALAC, MP3, AC-3, E-AC-3, Opus, FLAC): iPhone 16 and later add an APAC Spatial Audio track next to the stereo AAC one, and ffmpeg can neither decode it nor put it in an MP4, so mapping every audio track failed those videos (review C2, 2026-11-18). H.264 mode re-encodes the first usable track only.
    - JPG / PNG / GIF / MP4 → copied byte for byte.
    - HEIC → JPG, quality 92, keeping EXIF and applying rotation.
    - MOV (HEVC) → MP4 by lossless remux. Preference: "Re-encode to H.264 for old devices" (off by default).
