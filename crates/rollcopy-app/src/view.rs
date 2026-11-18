@@ -29,7 +29,7 @@ pub(crate) use crate::filters::{Filter, SyncFilter};
 pub(crate) use crate::guide::{guide, guide_busy, render_guide};
 pub(crate) use crate::widgets::{btn, muted, section_label};
 
-pub(crate) const LEFT_W: f32 = 270.;
+pub(crate) const LEFT_W: f32 = 240.;
 /// Minimum preview pane width; the grid always keeps room for at least one
 /// column. (Default width: `UiState::preview_width`.)
 pub(crate) const PREVIEW_MIN_W: f32 = 220.;

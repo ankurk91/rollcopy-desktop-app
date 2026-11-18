@@ -53,6 +53,8 @@ gpui_kit_assets::icon_assets!(
         ArrowUpNarrowWide,
         Battery,
         BatteryCharging,
+        BookImage,
+        CalendarX,
         ChevronDown,
         ChevronLeft,
         ChevronRight,
