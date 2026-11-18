@@ -49,6 +49,17 @@
   </keywords>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.6.0" date="2026-11-18">
+      <description>
+        <ul>
+          <li>New look: a sidebar with library, years, albums and the phone, a library bar with filter toggles, a larger info pane and a compact transfer dock</li>
+          <li>Sort by date, name, size or type</li>
+          <li>New app icon</li>
+          <li>iPhone 16 Spatial Audio videos convert; quitting stops conversions and leaves no half-written files</li>
+          <li>Fixes: a destination that can't be reached no longer hangs copying, Open shows the right photo, pairing stops asking for Trust over and over, free space counts copies already running</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-11-14">
       <description>
         <ul>

@@ -2,7 +2,7 @@
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
-Status: **v0.1.0 released (2026-11-12). M0–M7 done**: Check for updates finds the release. Backlog for 0.1.x in §15.
+Status: **v0.6.0 (2026-11-18). M0–M7 done**: Check for updates finds the release. Backlog for 0.1.x in §15.
 
 ---
 
@@ -426,7 +426,7 @@ The device, library, convert and queue crates have no UI dependency, so they can
 - In-app fullscreen viewer with ← / →.
 - Refresh cached thumbnails for items edited on the phone after caching.
 
-**Done after 0.5.0** (2026-11-18)
+**Done after 0.5.0** (2026-11-18, for 0.6.0)
 - New app icon (light squircle); the tray keeps its own glyph.
 - UI redesign in six stages (§6): palette in one file, sidebar sections, toolbar and library bar, grid
   badges and selection, info pane, transfer dock. Sort by name, size and type.
