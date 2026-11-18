@@ -17,7 +17,7 @@ Plug in the phone, tap **Trust**, pick what you want, and Rollcopy copies it to
 `~/Pictures/Rollcopy/<phone name>/YYYY/MM/images|videos/`, converting HEIC to JPG and MOV to MP4
 on the way.
 
-![Rollcopy on Linux Mint: an iPhone photo library by year and month with Hidden and Recently Deleted, a thumbnail grid with copied badges and filters, the preview pane with photo details, and the transfer queue](.github/screenshot.jpg?v=1)
+![Rollcopy on Linux Mint in dark mode: a sidebar with the library by year and month, albums, Hidden and Recently Deleted and the phone at the bottom; a thumbnail grid with filter toggles, copied and Live badges and two selected photos; the info pane with photo details; and the finished transfers](.github/screenshot.jpg?v=2)
 
 > **Status:** early (0.5.0). Linux only. Tested on Linux Mint 22 (Cinnamon, X11) with iOS 27, and on
 > Ubuntu 26.04 (GNOME, Wayland) in a virtual machine.
