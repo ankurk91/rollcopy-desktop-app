@@ -106,8 +106,15 @@ pub async fn serve(events: async_channel::Sender<Event>) {
             .serve_at(OBJECT_PATH, Application { events })
             .build()
             .await?;
-        conn.request_name_with_flags(APP_ID, zbus::fdo::RequestNameFlags::DO_NOT_QUEUE)
+        let reply = conn
+            .request_name_with_flags(APP_ID, zbus::fdo::RequestNameFlags::DO_NOT_QUEUE)
             .await?;
+        // Someone else has the name (another Rollcopy, when the lock file
+        // couldn't be used): a second launch would show that one instead
+        // (review S9).
+        if !matches!(reply, zbus::fdo::RequestNameReply::PrimaryOwner) {
+            crate::applog!("single-instance D-Bus name already taken ({reply:?})");
+        }
         Ok::<_, zbus::Error>(conn)
     }
     .await;
