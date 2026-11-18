@@ -160,6 +160,38 @@ impl CachePaths {
         self.root.join("open")
     }
 
+    /// Deletes cached thumbnails under `thumbs/<udid>/` that aren't in
+    /// `keep`: items gone from the phone, and the old copy left each time
+    /// an item is edited again (review P7). Files still being written
+    /// (`.part`) are left alone. Blocking; run it off the UI thread.
+    pub fn prune_thumbs(&self, udid: &str, keep: &HashSet<PathBuf>) -> usize {
+        fn walk(dir: &Path, keep: &HashSet<PathBuf>, removed: &mut usize) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries.flatten() {
+                let path = e.path();
+                match e.file_type() {
+                    Ok(t) if t.is_dir() => {
+                        walk(&path, keep, removed);
+                        // Gone if now empty; kept otherwise.
+                        let _ = std::fs::remove_dir(&path);
+                    }
+                    Ok(t) if t.is_file() => {
+                        let busy = path.extension().is_some_and(|x| x == "part");
+                        if !busy && !keep.contains(&path) && std::fs::remove_file(&path).is_ok() {
+                            *removed += 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut removed = 0;
+        walk(&self.root.join("thumbs").join(udid), keep, &mut removed);
+        removed
+    }
+
     /// Folder for one item's files opened with *Open*:
     /// `open/<udid>/<dir>/<file>[.e<edited_at>]/`. iOS reuses `IMG_0001`
     /// in each `DCIM/1xxAPPLE` folder, and an edit on the phone changes
@@ -726,6 +758,37 @@ mod tests {
 
     /// Review C3: two `IMG_0001.HEIC` in different DCIM folders, and the
     /// same item before and after an edit, never share an Open folder.
+    /// Only thumbnails of current items (and their blurred copies) stay;
+    /// a thumbnail being written stays too (review P7).
+    #[test]
+    fn prune_keeps_current_thumbnails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = CachePaths {
+            root: tmp.path().to_path_buf(),
+            state: tmp.path().join("state"),
+        };
+        let mut a = Asset::new("DCIM/100APPLE", "IMG_0001.HEIC", MediaKind::Photo);
+        a.edited_render = Some("/x/FullSizeRender.heic".into());
+        a.edited_at = Some(2);
+        let mut old_edit = a.clone();
+        old_edit.edited_at = Some(1);
+        let gone = Asset::new("DCIM/101APPLE", "IMG_0009.JPG", MediaKind::Photo);
+        let keep_thumb = paths.thumb("u", &a);
+        let keep_veil = paths.veil("u", &a);
+        let stale = [paths.thumb("u", &old_edit), paths.thumb("u", &gone)];
+        let busy = keep_thumb.with_extension("part");
+        for f in stale.iter().chain([&keep_thumb, &keep_veil, &busy]) {
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, b"x").unwrap();
+        }
+        let keep: std::collections::HashSet<_> = [keep_thumb.clone(), keep_veil.clone()].into();
+        assert_eq!(paths.prune_thumbs("u", &keep), 2);
+        assert!(keep_thumb.exists() && keep_veil.exists() && busy.exists());
+        assert!(stale.iter().all(|f| !f.exists()));
+        // The emptied folder of the removed item is gone too.
+        assert!(!stale[1].parent().unwrap().exists());
+    }
+
     #[test]
     fn open_cache_is_per_item_and_edit() {
         let paths = CachePaths {

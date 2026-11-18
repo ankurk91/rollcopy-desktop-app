@@ -86,6 +86,7 @@ impl MainView {
                 let keys: HashSet<String> = self.assets().iter().map(|a| a.device_path()).collect();
                 self.selected.retain(|k| keys.contains(k));
                 self.forget_hidden_thumbs(cx);
+                self.prune_thumbs(cx);
                 self.refresh_copied(cx);
                 self.counts_dirty = true;
                 self.recompute_visible();
@@ -167,6 +168,28 @@ impl MainView {
         self.forget_hidden_thumbs(cx);
         self.counts_dirty = true;
         self.recompute_visible();
+    }
+
+    /// Deletes cached thumbnails no current item uses, in the background
+    /// (review P7).
+    pub(crate) fn prune_thumbs(&mut self, cx: &mut Context<Self>) {
+        let Some(udid) = self.udid().map(str::to_owned) else {
+            return;
+        };
+        let keep: HashSet<std::path::PathBuf> = self
+            .assets()
+            .iter()
+            .flat_map(|a| [self.paths.thumb(&udid, a), self.paths.veil(&udid, a)])
+            .collect();
+        let paths = self.paths.clone();
+        cx.background_executor()
+            .spawn(async move {
+                let n = paths.prune_thumbs(&udid, &keep);
+                if n > 0 {
+                    crate::applog!("removed {n} old thumbnails");
+                }
+            })
+            .detach();
     }
 
     /// With the Hidden album not shown, deletes cached thumbnails of its
