@@ -78,7 +78,7 @@ pub fn dest_path_in(root: &Path, layout: Layout, a: &Asset) -> PathBuf {
 
 /// The `n`-th name tried for a destination: `IMG_0057.JPG`, then
 /// `IMG_0057 (2).JPG`, `IMG_0057 (3).JPG`, …
-fn candidate(base: &Path, n: u32) -> PathBuf {
+pub(crate) fn candidate(base: &Path, n: u32) -> PathBuf {
     if n <= 1 {
         return base.to_path_buf();
     }

@@ -246,6 +246,7 @@ pub fn spawn_with<O: Opener>(
         conflicts: VecDeque::new(),
         shown_conflict: None,
         conflict_default: None,
+        pending_conflicts: None,
         conns: Vec::new(),
         user_paused: false,
         device_paused: None,
@@ -295,6 +296,9 @@ struct Manager<O: Opener> {
     shown_conflict: Option<JobId>,
     /// "Do this for all": answer for further conflicts until the queue idles.
     conflict_default: Option<bool>,
+    /// Pending jobs found to hold an earlier copy, worked out once per run
+    /// of conflicts for the "N more" count (review P2).
+    pending_conflicts: Option<HashSet<JobId>>,
     /// Idle AFC connections, reused by the next job for the same phone.
     conns: Vec<(String, O::Media)>,
     user_paused: bool,
@@ -521,6 +525,8 @@ impl<O: Opener> Manager<O> {
     }
 
     fn add(&mut self, udid: String, assets: Vec<Asset>) {
+        // New items may conflict too; count again for the next conflict.
+        self.pending_conflicts = None;
         let active: HashSet<String> = self
             .jobs
             .values()
@@ -534,11 +540,15 @@ impl<O: Opener> Manager<O> {
             let id = self.next_id;
             self.next_id += 1;
             let reserved = &self.reserved;
-            // If the folder can't be checked now, the job fails when it
-            // starts and checks again (`dispatch`).
-            let dest = resolve_dest(&self.settings, &asset, |p| reserved.contains_key(p))
-                .map(|t| t.path().to_path_buf())
-                .unwrap_or_else(|_| crate::layout::dest_path(&self.settings, &asset));
+            // The first name no other queued item has. No disk access here:
+            // adding thousands of items to a network folder stalled the
+            // queue (review P2). `dispatch` checks the folder when the job
+            // starts and picks another name if needed.
+            let base = crate::layout::dest_path(&self.settings, &asset);
+            let dest = (1..)
+                .map(|n| crate::layout::candidate(&base, n))
+                .find(|p| !reserved.contains_key(p))
+                .unwrap_or(base);
             self.reserved.insert(dest.clone(), id);
             let name = dest
                 .file_name()
@@ -843,6 +853,7 @@ impl<O: Opener> Manager<O> {
         }
         self.shown_conflict = front;
         let Some(id) = front else {
+            self.pending_conflicts = None;
             self.emit(QueueEvent::ConflictCleared);
             return;
         };
@@ -850,18 +861,25 @@ impl<O: Opener> Manager<O> {
             return;
         };
         let meta = std::fs::metadata(&job.dest).ok();
-        let others = self.conflicts.len() - 1
-            + self
-                .pending
+        // Checked on disk once per run of conflicts, not each time the
+        // shown one changes (that stat'ed every pending job per answer).
+        let (jobs, pending) = (&self.jobs, &self.pending);
+        let found = self.pending_conflicts.get_or_insert_with(|| {
+            pending
                 .iter()
-                .filter_map(|p| self.jobs.get(p))
-                .filter(|j| {
-                    !j.overwrite
-                        && std::fs::metadata(&j.dest)
-                            .and_then(|m| m.modified())
-                            .is_ok_and(|t| crate::layout::is_copy_of(t, &j.asset))
+                .filter(|p| {
+                    jobs.get(p).is_some_and(|j| {
+                        !j.overwrite
+                            && std::fs::metadata(&j.dest)
+                                .and_then(|m| m.modified())
+                                .is_ok_and(|t| crate::layout::is_copy_of(t, &j.asset))
+                    })
                 })
-                .count();
+                .copied()
+                .collect()
+        });
+        let others =
+            self.conflicts.len() - 1 + self.pending.iter().filter(|p| found.contains(p)).count();
         self.emit(QueueEvent::Conflict {
             id,
             name: output_name(&job.asset),
