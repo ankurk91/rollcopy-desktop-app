@@ -981,11 +981,13 @@ impl MainView {
         } else {
             a.filename.clone()
         };
+        let dir = self.paths.open_for(&udid, a);
         self.status = Some(format!("Opening {name}…"));
         let _ = self.commands.try_send(Command::Open {
             udid,
             device_path: plan.source,
             name,
+            dir,
         });
     }
 }

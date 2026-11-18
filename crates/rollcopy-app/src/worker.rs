@@ -64,6 +64,8 @@ pub enum Command {
         udid: String,
         device_path: String,
         name: String,
+        /// This item's own cache folder (`CachePaths::open_for`).
+        dir: PathBuf,
     },
     Queue(QueueCommand),
     /// Read the phone's library again (new photos since it was plugged in).
@@ -156,6 +158,20 @@ impl CachePaths {
 
     pub fn open_dir(&self) -> PathBuf {
         self.root.join("open")
+    }
+
+    /// Folder for one item's files opened with *Open*:
+    /// `open/<udid>/<dir>/<file>[.e<edited_at>]/`. iOS reuses `IMG_0001`
+    /// in each `DCIM/1xxAPPLE` folder, and an edit on the phone changes
+    /// the file, so a cache keyed by name alone showed the wrong photo
+    /// (review C3). The file keeps its own name inside, for the viewer's
+    /// title.
+    pub fn open_for(&self, udid: &str, a: &Asset) -> PathBuf {
+        let name = match (a.is_edited(), a.edited_at) {
+            (true, t) => format!("{}.e{}", a.filename, t.unwrap_or(0)),
+            (false, _) => a.filename.clone(),
+        };
+        self.open_dir().join(udid).join(&a.directory).join(name)
     }
 }
 
@@ -442,14 +458,14 @@ async fn serve_commands(
                     udid,
                     device_path,
                     name,
+                    dir,
                 } => {
                     // Own task and connection: a large video must not hold
                     // up thumbnails while it copies.
-                    let (tx, paths) = (tx.clone(), paths.clone());
+                    let tx = tx.clone();
                     tokio::spawn(async move {
                         let mut own = None;
-                        let ev = match open_file(&mut own, &udid, &device_path, &name, &paths).await
-                        {
+                        let ev = match open_file(&mut own, &udid, &device_path, &name, &dir).await {
                             Ok((app, hint)) => Event::Opened { name, app, hint },
                             Err(e) => Event::OpenFailed {
                                 name,
@@ -619,7 +635,7 @@ async fn open_file(
     udid: &str,
     device_path: &str,
     name: &str,
-    paths: &CachePaths,
+    dir: &Path,
 ) -> Result<(Option<String>, Option<String>), DeviceError> {
     // HEIC is shown as a JPG: many image viewers (Mint's Xviewer among
     // them) can't read HEIC at all.
@@ -642,8 +658,7 @@ async fn open_file(
         crate::players::Check::Fine { app } => (app, None),
         crate::players::Check::MayNotPlay { app, hint } => (app, Some(hint)),
     };
-    let dir = paths.open_dir();
-    tokio::fs::create_dir_all(&dir).await?;
+    tokio::fs::create_dir_all(dir).await?;
     let dest = dir.join(name);
     let fs = connect(conn, udid).await?;
     let size = fs.stat(device_path).await?.size;
@@ -680,4 +695,43 @@ async fn open_file(
         )));
     }
     Ok((app, hint))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CachePaths;
+    use rollcopy_library::{Asset, MediaKind};
+    use std::path::PathBuf;
+
+    /// Review C3: two `IMG_0001.HEIC` in different DCIM folders, and the
+    /// same item before and after an edit, never share an Open folder.
+    #[test]
+    fn open_cache_is_per_item_and_edit() {
+        let paths = CachePaths {
+            root: PathBuf::from("/c"),
+            state: PathBuf::from("/s"),
+        };
+        let a = Asset::new("DCIM/100APPLE", "IMG_0001.HEIC", MediaKind::Photo);
+        let b = Asset::new("DCIM/101APPLE", "IMG_0001.HEIC", MediaKind::Photo);
+        assert_eq!(
+            paths.open_for("u", &a),
+            PathBuf::from("/c/open/u/DCIM/100APPLE/IMG_0001.HEIC")
+        );
+        assert_ne!(paths.open_for("u", &a), paths.open_for("u", &b));
+
+        let mut edited = a.clone();
+        edited.edited_render = Some(
+            "/PhotoData/Mutations/DCIM/100APPLE/IMG_0001/Adjustments/FullSizeRender.heic".into(),
+        );
+        edited.edited_at = Some(1_700_000_000);
+        let mut edited_again = edited.clone();
+        edited_again.edited_at = Some(1_700_000_500);
+        assert_ne!(paths.open_for("u", &edited), paths.open_for("u", &a));
+        assert_ne!(
+            paths.open_for("u", &edited),
+            paths.open_for("u", &edited_again)
+        );
+        // Everything stays under `open/`, which is cleared at start and quit.
+        assert!(paths.open_for("u", &edited).starts_with(paths.open_dir()));
+    }
 }
