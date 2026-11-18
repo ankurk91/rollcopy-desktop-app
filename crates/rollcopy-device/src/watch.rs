@@ -15,6 +15,10 @@ use crate::session::{DeviceInfo, DeviceRef, Session, list_devices, pair};
 const POLL: Duration = Duration::from_secs(1);
 /// Retry interval while the phone is locked or a request failed.
 const RETRY: Duration = Duration::from_secs(2);
+/// Pair requests that may fail (other than Don't Trust or a locked phone)
+/// before Rollcopy stops asking. Each new request is a new Trust dialog on
+/// the phone, so retrying forever showed one every few seconds (review C6).
+const MAX_PAIR_FAILURES: u32 = 3;
 /// A phone that vanishes this soon after appearing points at a bad cable or
 /// port (seen 2026-11-12: usbmuxd attach, then kernel error -71).
 const FLAKY_WITHIN: Duration = Duration::from_secs(5);
@@ -45,6 +49,9 @@ pub enum Phase {
     WaitingForTrust { udid: String },
     /// The user tapped Don't Trust: "Unplug and re-plug to ask again".
     TrustDenied { udid: String },
+    /// Pairing failed several times; Rollcopy stopped asking so the phone
+    /// doesn't keep showing Trust dialogs. "Unplug and re-plug to try again".
+    PairingFailed { udid: String, message: String },
     /// "Unlock your iPhone".
     Locked { udid: String },
     /// Connected and trusted.
@@ -59,6 +66,7 @@ impl Phase {
             Self::Connecting { udid }
             | Self::WaitingForTrust { udid }
             | Self::TrustDenied { udid }
+            | Self::PairingFailed { udid, .. }
             | Self::Locked { udid }
             | Self::Failed { udid, .. } => Some(udid),
             Self::Ready { info } => Some(&info.udid),
@@ -97,6 +105,48 @@ struct Tracked {
     next_try: Instant,
     /// First time this phone was seen without a pair record.
     unpaired_since: Option<Instant>,
+    /// Pair requests that failed so far (see [`after_pair`]).
+    pair_failures: u32,
+    /// Stopped asking after too many failures, until it's re-plugged.
+    gave_up: bool,
+}
+
+/// What to do after a pair request ended.
+#[derive(Debug, PartialEq)]
+enum PairOutcome {
+    /// Paired: connect again now.
+    Paired,
+    /// Show this and try again after the delay.
+    Retry(Phase, Duration),
+    /// Show this and don't ask again until the phone is re-plugged.
+    Stop(Phase),
+}
+
+/// Decides what follows a pair request. "Still waiting for Trust" just
+/// waits; Don't Trust stops; a locked phone retries; anything else backs
+/// off (2 s, 4 s, …) and stops after [`MAX_PAIR_FAILURES`], because every
+/// request makes the phone show the Trust dialog again (review C6).
+/// `failures` counts failures before this one; it's updated.
+fn after_pair(udid: &str, result: Result<(), DeviceError>, failures: &mut u32) -> PairOutcome {
+    let udid = udid.to_owned();
+    match result {
+        Ok(()) => PairOutcome::Paired,
+        Err(DeviceError::PairingPending) => {
+            PairOutcome::Retry(Phase::WaitingForTrust { udid }, RETRY)
+        }
+        Err(DeviceError::PairingDenied) => PairOutcome::Stop(Phase::TrustDenied { udid }),
+        Err(DeviceError::Locked) => PairOutcome::Retry(Phase::Locked { udid }, RETRY),
+        Err(e) => {
+            *failures += 1;
+            let message = e.to_string();
+            if *failures >= MAX_PAIR_FAILURES {
+                PairOutcome::Stop(Phase::PairingFailed { udid, message })
+            } else {
+                let wait = RETRY * 2u32.pow(*failures - 1);
+                PairOutcome::Retry(Phase::Failed { udid, message }, wait)
+            }
+        }
+    }
 }
 
 impl Drop for Tracked {
@@ -155,6 +205,8 @@ pub async fn watch(emit: impl FnMut(Phase)) {
                 pairing: None,
                 next_try: Instant::now(),
                 unpaired_since: None,
+                pair_failures: 0,
+                gave_up: false,
             });
         }
 
@@ -173,7 +225,7 @@ pub async fn watch(emit: impl FnMut(Phase)) {
         };
         let udid = t.dev.udid.clone();
 
-        if ready || t.denied {
+        if ready || t.denied || t.gave_up {
             tokio::time::sleep(POLL).await;
             continue;
         }
@@ -181,29 +233,19 @@ pub async fn watch(emit: impl FnMut(Phase)) {
         // A pair request is running: wait for its result.
         if t.pairing.is_some() {
             if let Some(task) = t.pairing.take_if(|task| task.is_finished()) {
-                match task.await {
-                    Ok(Ok(())) => t.next_try = Instant::now(),
-                    Ok(Err(DeviceError::PairingDenied)) => {
-                        t.denied = true;
-                        out.send(Phase::TrustDenied { udid });
+                let result = task
+                    .await
+                    .unwrap_or_else(|join| Err(DeviceError::Other(join.to_string())));
+                match after_pair(&udid, result, &mut t.pair_failures) {
+                    PairOutcome::Paired => t.next_try = Instant::now(),
+                    PairOutcome::Retry(phase, wait) => {
+                        t.next_try = Instant::now() + wait;
+                        out.send(phase);
                     }
-                    Ok(Err(DeviceError::Locked)) => {
-                        t.next_try = Instant::now() + RETRY;
-                        out.send(Phase::Locked { udid });
-                    }
-                    Ok(Err(e)) => {
-                        t.next_try = Instant::now() + RETRY;
-                        out.send(Phase::Failed {
-                            udid,
-                            message: e.to_string(),
-                        });
-                    }
-                    Err(join) => {
-                        t.next_try = Instant::now() + RETRY;
-                        out.send(Phase::Failed {
-                            udid,
-                            message: join.to_string(),
-                        });
+                    PairOutcome::Stop(phase) => {
+                        t.denied = matches!(phase, Phase::TrustDenied { .. });
+                        t.gave_up = !t.denied;
+                        out.send(phase);
                     }
                 }
             }
@@ -268,4 +310,50 @@ pub async fn watch(emit: impl FnMut(Phase)) {
 async fn open_and_read(udid: &str) -> Result<DeviceInfo, DeviceError> {
     let mut s = Session::open(udid).await?;
     s.info().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn waiting_for_trust_is_not_a_failure() {
+        let mut failures = 0;
+        assert_eq!(
+            after_pair("u", Err(DeviceError::PairingPending), &mut failures),
+            PairOutcome::Retry(Phase::WaitingForTrust { udid: "u".into() }, RETRY)
+        );
+        assert_eq!(failures, 0);
+        assert_eq!(after_pair("u", Ok(()), &mut failures), PairOutcome::Paired);
+    }
+
+    /// A pair request that keeps failing backs off, then stops: every
+    /// request is a new Trust dialog on the phone (review C6).
+    #[test]
+    fn failing_pair_requests_back_off_then_stop() {
+        let mut failures = 0;
+        let fail = || Err(DeviceError::Other("save refused".into()));
+        let waits: Vec<_> = (0..2)
+            .map(|_| match after_pair("u", fail(), &mut failures) {
+                PairOutcome::Retry(Phase::Failed { .. }, wait) => wait,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(waits, vec![RETRY, RETRY * 2]);
+        assert!(matches!(
+            after_pair("u", fail(), &mut failures),
+            PairOutcome::Stop(Phase::PairingFailed { .. })
+        ));
+        // Don't Trust and a locked phone aren't counted.
+        let mut failures = 0;
+        assert!(matches!(
+            after_pair("u", Err(DeviceError::PairingDenied), &mut failures),
+            PairOutcome::Stop(Phase::TrustDenied { .. })
+        ));
+        assert!(matches!(
+            after_pair("u", Err(DeviceError::Locked), &mut failures),
+            PairOutcome::Retry(Phase::Locked { .. }, _)
+        ));
+        assert_eq!(failures, 0);
+    }
 }

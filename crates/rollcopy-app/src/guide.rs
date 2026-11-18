@@ -96,6 +96,16 @@ pub(crate) fn render_guide(phase: &Phase, cx: &mut Context<MainView>) -> AnyElem
             true,
             cx,
         ),
+        Phase::PairingFailed { message, .. } => guide(
+            IconName::ShieldX,
+            "Couldn't pair with your iPhone",
+            format!(
+                "Unplug your iPhone and plug it back in to try again. If it keeps happening, \
+                 try another cable or USB port. ({message})"
+            ),
+            true,
+            cx,
+        ),
         Phase::Locked { .. } => guide_busy(
             IconName::Lock,
             "Unlock your iPhone",

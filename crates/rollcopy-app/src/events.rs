@@ -432,6 +432,7 @@ pub(crate) fn phase_label(p: &Phase) -> &'static str {
         Phase::Connecting { .. } => "connecting",
         Phase::WaitingForTrust { .. } => "waiting-for-trust",
         Phase::TrustDenied { .. } => "trust-denied",
+        Phase::PairingFailed { .. } => "pairing-failed",
         Phase::Locked { .. } => "locked",
         Phase::Ready { .. } => "ready",
         Phase::Failed { .. } => "failed",
