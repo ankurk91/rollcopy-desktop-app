@@ -23,6 +23,10 @@
       <li>Read-only towards the phone: it never changes or deletes anything there</li>
       <li>Works offline; no account or cloud needed</li>
     </ul>
+    <p>
+      Needs the usbmuxd service on your computer, which talks to the iPhone over
+      USB. On Ubuntu or Linux Mint: sudo apt install usbmuxd
+    </p>
   </description>
   <launchable type="desktop-id">io.github.ankurk91.Rollcopy.desktop</launchable>
   <provides>
@@ -33,8 +37,8 @@
   <url type="vcs-browser">https://github.com/ankurk91/rollcopy-desktop-app</url>
   <screenshots>
     <screenshot type="default">
-      <caption>The library with the preview pane</caption>
-      <image>https://raw.githubusercontent.com/ankurk91/rollcopy-desktop-app/main/.github/screenshot.jpg</image>
+      <caption>The library by year and month, with filters and the info pane</caption>
+      <image>https://raw.githubusercontent.com/ankurk91/rollcopy-desktop-app/v0.6.0/.github/screenshot.jpg</image>
     </screenshot>
   </screenshots>
   <categories>
@@ -47,6 +51,10 @@
     <keyword>photos</keyword>
     <keyword>import</keyword>
   </keywords>
+  <branding>
+    <color type="primary" scheme_preference="light">#dcd2f5</color>
+    <color type="primary" scheme_preference="dark">#3b2a6b</color>
+  </branding>
   <content_rating type="oars-1.1"/>
   <releases>
     <release version="0.6.0" date="2026-11-18">
