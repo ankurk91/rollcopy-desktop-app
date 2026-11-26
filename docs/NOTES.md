@@ -113,6 +113,19 @@ it like this" details. Keep both up to date. No personal data here (see [AGENTS.
 - **Old copy shadowing a new install:** `packaging/install-local.sh` puts a binary in `~/.local/bin` and a
   menu entry in `~/.local/share/applications`, both ahead of the .deb's. Use `--uninstall`.
 
+## Flatpak
+
+- A sandbox only sees the usbmuxd socket that existed when it started; usbmuxd replaces it on every
+  re-plug, and Flatpak won't expose `/run`. Hence the relay started through the portal
+  (`flatpak-spawn`, no `--host`) in a fresh sandbox; details and test results in FLATPAK.md.
+- `flatpak-spawn --watch-bus` did not stop the spawned helper when the caller exited (2026-11-26);
+  the relay watches a lock the app holds instead.
+- zbus 6 + `xdg-dbus-proxy` < 0.1.6 (Ubuntu 24.04, Mint 22): "Invalid message header read" and every
+  session-bus connection drops. Stay on zbus 5 until hosts have 0.1.6.
+- ksni in Flatpak: `disable_dbus_name(true)`, or the watcher answers ServiceUnknown.
+- `org.flatpak.Builder` runs sandboxed: give it `--filesystem=<dir>` for the manifest, the build and
+  state dirs, or it can't see them.
+
 ## gpui / gpui-kit quirks
 
 - Pin `gpui-kit` exactly (`=0.9.1`, which pins `gpui-pre =0.3.12`); gpui-component needs it, not the
