@@ -2,7 +2,7 @@ use idevice::IdeviceService;
 use idevice::afc::AfcClient;
 use idevice::lockdown::LockdownClient;
 use idevice::provider::{IdeviceProvider, UsbmuxdProvider};
-use idevice::usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdConnection};
+use idevice::usbmuxd::{Connection, UsbmuxdConnection};
 use plist::{Dictionary, Value};
 
 use crate::error::{DeviceError, Result};
@@ -49,9 +49,7 @@ fn usbmuxd_unavailable(e: idevice::IdeviceError) -> DeviceError {
 /// [`DeviceError::UsbmuxdUnavailable`], which in practice usually means "no
 /// Apple device plugged in" (the daemon is started on demand by udev).
 pub async fn list_devices() -> Result<Vec<DeviceRef>> {
-    let mut mux = UsbmuxdConnection::default()
-        .await
-        .map_err(usbmuxd_unavailable)?;
+    let mut mux = crate::mux::connect().await.map_err(usbmuxd_unavailable)?;
     let devices = mux.get_devices().await.map_err(usbmuxd_unavailable)?;
     Ok(devices
         .into_iter()
@@ -152,13 +150,11 @@ impl Session {
     }
 
     async fn open_inner(udid: &str) -> Result<Self> {
-        let mut mux = UsbmuxdConnection::default()
-            .await
-            .map_err(usbmuxd_unavailable)?;
+        let mut mux = crate::mux::connect().await.map_err(usbmuxd_unavailable)?;
         let device = usb_device(&mut mux, udid).await?;
         let pairing = mux.get_pair_record(udid).await.map_err(pair_record_error)?;
 
-        let provider = device.to_provider(UsbmuxdAddr::default(), LABEL);
+        let provider = device.to_provider(crate::mux::addr(), LABEL);
         let mut lockdown = LockdownClient::connect(&provider).await?;
         lockdown.start_session(&pairing).await?;
 
@@ -253,12 +249,10 @@ fn uint(d: &Dictionary, key: &str) -> Option<u64> {
 /// [`DeviceError::PairingDenied`] for Don't Trust and [`DeviceError::Locked`]
 /// when the phone must be unlocked before it can show the dialog.
 pub async fn pair(udid: &str) -> Result<()> {
-    let mut mux = UsbmuxdConnection::default()
-        .await
-        .map_err(usbmuxd_unavailable)?;
+    let mut mux = crate::mux::connect().await.map_err(usbmuxd_unavailable)?;
     let device = usb_device(&mut mux, udid).await?;
     let buid = mux.get_buid().await?;
-    let provider = device.to_provider(UsbmuxdAddr::default(), LABEL);
+    let provider = device.to_provider(crate::mux::addr(), LABEL);
     let mut lockdown = LockdownClient::connect(&provider).await?;
 
     let host_id = uuid::Uuid::new_v4().to_string().to_uppercase();
@@ -268,9 +262,7 @@ pub async fn pair(udid: &str) -> Result<()> {
     let record = lockdown.pair(host_id, buid, Some(&host_name)).await?;
 
     let bytes = record.serialize()?;
-    let mut mux = UsbmuxdConnection::default()
-        .await
-        .map_err(usbmuxd_unavailable)?;
+    let mut mux = crate::mux::connect().await.map_err(usbmuxd_unavailable)?;
     if mux.save_pair_record(udid, bytes.clone()).await.is_ok() {
         return Ok(());
     }
@@ -278,13 +270,9 @@ pub async fn pair(udid: &str) -> Result<()> {
     // may have saved one, or an old rejected one is still there). The phone
     // accepted our record, so replace whatever is on this computer. Only the
     // local record is touched.
-    let mut mux = UsbmuxdConnection::default()
-        .await
-        .map_err(usbmuxd_unavailable)?;
+    let mut mux = crate::mux::connect().await.map_err(usbmuxd_unavailable)?;
     let _ = mux.delete_pair_record(udid).await;
-    let mut mux = UsbmuxdConnection::default()
-        .await
-        .map_err(usbmuxd_unavailable)?;
+    let mut mux = crate::mux::connect().await.map_err(usbmuxd_unavailable)?;
     mux.save_pair_record(udid, bytes).await?;
     Ok(())
 }

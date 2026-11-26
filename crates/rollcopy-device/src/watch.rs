@@ -77,7 +77,14 @@ impl Phase {
 
 /// Whether the usbmuxd daemon is installed. Its socket only exists while an
 /// Apple device is plugged in, so the socket alone can't tell us this.
+///
+/// Inside Flatpak the host's programs can't be seen, so it's assumed to be
+/// installed; the guide then says to plug in the phone, and mentions
+/// usbmuxd.
 pub fn usbmuxd_installed() -> bool {
+    if crate::mux::relayed() {
+        return true;
+    }
     ["/usr/sbin/usbmuxd", "/usr/bin/usbmuxd", "/sbin/usbmuxd"]
         .iter()
         .any(|p| Path::new(p).exists())

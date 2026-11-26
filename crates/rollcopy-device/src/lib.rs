@@ -7,6 +7,8 @@
 mod error;
 mod media;
 pub mod models;
+pub mod mux;
+pub mod relay;
 mod session;
 mod watch;
 
