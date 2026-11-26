@@ -99,48 +99,116 @@ Not needed: `--share=network`, `--device=all`, `--talk-name=org.freedesktop.Flat
 
 ## Releasing to Flathub
 
-**First submission** (once): a PR to `flathub/flathub`, branched from its
-`new-pr` branch, titled `Add io.github.ankurk91.Rollcopy`. The local clone is
-`../flathub-fork` (branch `rollcopy-submission`, pushes go to the fork; pushing
-to `upstream` is disabled). After approval Flathub creates the repo
-`flathub/io.github.ankurk91.Rollcopy`, and invites the maintainer (needs
-GitHub 2FA, accept within a week).
+These steps assume the Flathub submission is done: the app is on Flathub and
+its packaging lives in `flathub/io.github.ankurk91.Rollcopy`, where the
+maintainer has write access. Each new Rollcopy release is a pull request
+there. Paths below are examples; adjust them to your machine.
 
-**Every release after that** is a PR to `flathub/io.github.ankurk91.Rollcopy`,
-not to `flathub/flathub`:
+**One-time setup on a new machine**
 
-1. Release the app as usual (tag `vX.Y.Z`, metainfo `<releases>` entry,
-   NOTES.md "Build, CI and release"). The manifest reads the metainfo, icon and
-   desktop file from that tag.
-2. In the manifest, point the Rollcopy source at the new tag and the commit it
-   points to (`git rev-parse vX.Y.Z^{commit}`).
-3. Regenerate `cargo-sources.json` from that tag's `Cargo.lock` (Flathub
-   builds offline, so every crate is listed in advance). Needed whenever
+```sh
+mkdir -p ~/projects && cd ~/projects
+# Flathub's packaging repo for Rollcopy
+git clone https://github.com/flathub/io.github.ankurk91.Rollcopy.git
+# Flatpak's tools, for generating cargo-sources.json
+git clone https://github.com/flatpak/flatpak-builder-tools.git
+# The builder, its linter and the runtimes
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user -y flathub org.flatpak.Builder
+```
+
+It also needs [uv](https://docs.astral.sh/uv/) to run Python, and a clone of
+the Rollcopy app repo (`rollcopy-desktop-app`) next to the others.
+
+**For every release**
+
+1. Release the app as usual (tag `vX.Y.Z`, metainfo `<releases>` entry; see
+   NOTES.md "Build, CI and release"). The manifest reads the metainfo, icon
+   and desktop file from that tag.
+2. In `io.github.ankurk91.Rollcopy`, start a branch from the latest `master`:
+
+   ```sh
+   cd ~/projects/io.github.ankurk91.Rollcopy
+   git switch master && git pull
+   git switch -c update-X.Y.Z
+   ```
+
+3. In the manifest, point the Rollcopy source at the new tag and the commit
+   it points to:
+
+   ```sh
+   git -C ../rollcopy-desktop-app fetch --tags
+   git -C ../rollcopy-desktop-app rev-parse vX.Y.Z^{commit}
+   ```
+
+4. Regenerate `cargo-sources.json` from that tag's `Cargo.lock`. Flathub
+   builds offline, so every crate is listed in advance. It's needed whenever
    `Cargo.lock` changes outside our own crates (Dependabot, `cargo update`, a
    new dependency); simplest is every release:
 
    ```sh
+   git -C ../flatpak-builder-tools pull
    git -C ../rollcopy-desktop-app show vX.Y.Z:Cargo.lock > /tmp/rollcopy-Cargo.lock
    uv run --with aiohttp --with tomlkit --with pyyaml \
      python ../flatpak-builder-tools/cargo/flatpak-cargo-generator.py \
      /tmp/rollcopy-Cargo.lock -o cargo-sources.json
    ```
 
-   (`flatpak-builder-tools` is a clone of
-   github.com/flatpak/flatpak-builder-tools; its needs are in
-   `cargo/pyproject.toml`.)
-4. Build, run and lint locally:
+   If it reports a missing Python module, its current needs are in
+   `flatpak-builder-tools/cargo/pyproject.toml`; add each with `--with`.
+5. Build, run and lint locally (`flathub-build` also makes the `repo/` the
+   second lint needs):
 
    ```sh
    flatpak run --command=flathub-build org.flatpak.Builder --install io.github.ankurk91.Rollcopy.yml
-   flatpak run io.github.ankurk91.Rollcopy
    flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest io.github.ankurk91.Rollcopy.yml
    flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo repo
    ```
 
-   Don't commit `repo/` or the build folders.
-5. Open the PR. Flathub builds it; merging publishes the update. Also update
-   other bundled sources (libde265, ffmpeg) when they have security fixes.
+   Then check the installed build:
+
+   ```sh
+   # Run the app
+   flatpak run io.github.ankurk91.Rollcopy
+
+   # Shell inside the sandbox
+   flatpak run --command=sh io.github.ankurk91.Rollcopy
+
+   # Check that ffmpeg is bundled and has the right build options
+   flatpak run --command=ffmpeg io.github.ankurk91.Rollcopy -hide_banner -buildconf | grep -E 'x264|zimg|vaapi'
+
+   # Log D-Bus traffic (notifications, tray, portals)
+   flatpak run --log-session-bus io.github.ankurk91.Rollcopy
+
+   # Show the permissions the app actually got
+   flatpak info --show-permissions io.github.ankurk91.Rollcopy
+   ```
+
+   After changing the manifest, build again with the same command. Either
+   is fine for testing; only `flathub-build` makes the `repo/` the second
+   lint needs:
+
+   ```sh
+   flatpak run --command=flathub-build org.flatpak.Builder --install io.github.ankurk91.Rollcopy.yml
+   # or
+   flatpak run org.flatpak.Builder --force-clean --user --install \
+     --install-deps-from=flathub builddir io.github.ankurk91.Rollcopy.yml
+   ```
+
+   To remove the local build afterwards (before installing Rollcopy from
+   Flathub, which uses the same app ID):
+
+   ```sh
+   flatpak uninstall --user io.github.ankurk91.Rollcopy
+   ```
+
+   Test with a phone: plugged in after start, re-plugged while running, a
+   photo and a video copied, Open, Show in folder. Don't commit `repo/` or the
+   build folders.
+6. Commit the manifest and `cargo-sources.json`, push the branch, and open a
+   PR against `master`. Flathub builds it; merging publishes the update. Also
+   update other bundled sources (libde265, ffmpeg and its libraries) when they
+   have security fixes.
 
 Flathub's rules: the manifest, its commits, the PR and replies to reviewers
 are the maintainer's own work (no AI-generated or AI-assisted content), and
