@@ -63,7 +63,7 @@ it like this" details. Keep both up to date. No personal data here (see [AGENTS.
 - Cancel sets a flag that kills ffmpeg (checked every 20 ms) and stops the HEIC encoder, then aborts the
   task; `spawn_blocking` work can't be aborted otherwise (NEW-03).
 - One instance per session: `flock` on `~/.local/state/rollcopy/rollcopy.lock` plus the D-Bus name
-  `io.github.ankurk91.Rollcopy`; a second launch calls `org.freedesktop.Application.Activate` (REL-03).
+  `io.github.ankurk91.rollcopy-desktop-app`; a second launch calls `org.freedesktop.Application.Activate` (REL-03).
 
 ## Conversion
 
@@ -115,6 +115,10 @@ it like this" details. Keep both up to date. No personal data here (see [AGENTS.
 
 ## Flatpak
 
+- App id `io.github.ankurk91.rollcopy-desktop-app` (until 0.7.0: `io.github.ankurk91.Rollcopy`): Flathub's
+  `appid-url-not-reachable` lint wants `github.com/<user>/<last part>` to answer 200, no redirect. A dash is only
+  allowed in the last part; the D-Bus object path uses underscores.
+
 - A sandbox only sees the usbmuxd socket that existed when it started; usbmuxd replaces it on every
   re-plug, and Flatpak won't expose `/run`. Hence the relay started through the portal
   (`flatpak-spawn`, no `--host`) in a fresh sandbox; details and test results in FLATPAK.md.
@@ -164,7 +168,7 @@ it like this" details. Keep both up to date. No personal data here (see [AGENTS.
   it, and Dependabot skips libheif-rs on purpose. It decodes HEICs other people sent (WhatsApp,
   AirDrop). If there's a fix, bump libheif-rs and its `v1_xx` feature (review S1). ffmpeg and libde265
   come from the system and get distro updates.
-- Flathub: after each release, update the Flatpak manifest in `flathub/io.github.ankurk91.Rollcopy`
+- Flathub: after each release, update the Flatpak manifest in `flathub/io.github.ankurk91.rollcopy-desktop-app`
   (new tag and commit, regenerated `cargo-sources.json`); steps in FLATPAK.md "Releasing to Flathub".
 - AppImage: appimagetool only reads `*.appdata.xml`, so the metainfo is copied under that name.
 - Checking release status: `gh api repos/<owner>/<repo>/releases/tags/<tag>` (a drafts-blind login can

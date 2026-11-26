@@ -42,7 +42,7 @@ use std::borrow::Cow;
 use gpui_kit::*;
 
 const APP_NAME: &str = "Rollcopy";
-pub(crate) const APP_ID: &str = "io.github.ankurk91.Rollcopy";
+pub(crate) const APP_ID: &str = "io.github.ankurk91.rollcopy-desktop-app";
 /// Smallest main window: room for the side pane and one grid column.
 const MIN_W: f32 = 640.;
 const MIN_H: f32 = 480.;
@@ -121,7 +121,7 @@ impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if path == about::APP_ICON {
             return Ok(Some(Cow::Borrowed(include_bytes!(
-                "../../../packaging/icons/io.github.ankurk91.Rollcopy.svg"
+                "../../../packaging/icons/io.github.ankurk91.rollcopy-desktop-app.svg"
             ))));
         }
         AppAssets.load(path)

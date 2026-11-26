@@ -6,7 +6,7 @@
 #   usbmuxd (system daemon, talks to the phone) and ffmpeg (video conversion).
 set -euo pipefail
 
-ID=io.github.ankurk91.Rollcopy
+ID=io.github.ankurk91.rollcopy-desktop-app
 LINUXDEPLOY_TAG=1-alpha-20251107-1
 LINUXDEPLOY_SHA256=c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
 

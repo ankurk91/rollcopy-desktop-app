@@ -2,7 +2,7 @@
 <!-- AppStream metadata: shown by software centres (GNOME Software, Discover,
      Flathub). Checked in CI with `appstreamcli validate`. -->
 <component type="desktop-application">
-  <id>io.github.ankurk91.Rollcopy</id>
+  <id>io.github.ankurk91.rollcopy-desktop-app</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <name>Rollcopy</name>
@@ -28,7 +28,7 @@
       USB. On Ubuntu or Linux Mint: sudo apt install usbmuxd
     </p>
   </description>
-  <launchable type="desktop-id">io.github.ankurk91.Rollcopy.desktop</launchable>
+  <launchable type="desktop-id">io.github.ankurk91.rollcopy-desktop-app.desktop</launchable>
   <provides>
     <binary>rollcopy</binary>
   </provides>
@@ -57,6 +57,11 @@
   </branding>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.7.1" date="2026-11-26">
+      <description>
+        <p>New app ID, io.github.ankurk91.rollcopy-desktop-app, matching the project's repository, as Flathub requires. Settings are kept.</p>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-11-26">
       <description>
         <ul>

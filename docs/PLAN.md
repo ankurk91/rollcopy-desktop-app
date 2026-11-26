@@ -2,7 +2,7 @@
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
-Status: **v0.7.0 (2026-11-26). M0–M7 done**: Check for updates finds the release. Backlog for 0.1.x in §15.
+Status: **v0.7.1 (2026-11-26). M0–M7 done**: Check for updates finds the release. Backlog for 0.1.x in §15.
 
 ---
 
@@ -16,7 +16,10 @@ Status: **v0.7.0 (2026-11-26). M0–M7 done**: Check for updates finds the relea
   rollcopy.com/.app/.dev had no DNS records. Rejected: Tuxroll (a dice maker uses @tuxroll),
   Tuxpix (too close to the Tuxpi photo editor), Rolldock (a shipping company), Rollferry (.com taken).
 - The name avoids Apple trademarks ("i…", "iPhone"); "iPhone" goes in descriptions for search.
-- Binary `rollcopy`, app id `io.github.ankurk91.Rollcopy`, repo `github.com/ankurk91/rollcopy-desktop-app`.
+- Binary `rollcopy`, app id `io.github.ankurk91.rollcopy-desktop-app`, repo `github.com/ankurk91/rollcopy-desktop-app`.
+- The app id was `io.github.ankurk91.Rollcopy` until 0.7.0. Changed for 0.7.1 (2026-11-26) because Flathub checks that an
+  `io.github.<user>.<name>` id matches the repo `github.com/<user>/<name>` exactly (no redirects), and the repo keeps its
+  name. Settings live under `rollcopy` folders, not the id, so they carry over.
 
 ## 2. Goal and scope
 
@@ -221,7 +224,7 @@ system light/dark setting unless one is picked.
 - The icon changes with status: idle / device connected / copying (progress tooltip) / error.
 - Menu: Show Rollcopy · `<device name>` · Pause/Resume · Quit.
 - Closing the window keeps the app in the tray **only while a copy is running**. Otherwise it quits. As built in M6: closing during a copy **minimises the window** (gpui can't hide windows on Linux) and sends a "still copying" notification. *Show Rollcopy* or a click on the icon brings it back. When the copies finish it notifies and **stays in the tray** (changed 2026-11-12 at the user's request; quitting there also cut off the notification). Quit from the tray menu, or bring the window back and close it. With no tray host, or with the preference off, closing asks "Copies are still running: Keep copying / Quit".
-- **One instance per session** (audit REL-03, 2026-11-13). Starting Rollcopy again, which is the normal way back from the tray, used to start a second process that shared the staging and cache files with the first one. Now the first instance holds a `flock` on `~/.local/state/rollcopy/rollcopy.lock` and owns the D-Bus name `io.github.ankurk91.Rollcopy` (`org.freedesktop.Application.Activate`). A second launch calls Activate, which brings the first window to the front, then exits. Staging files are named `<pid>-<n>.<ext>` as well, so they never clash.
+- **One instance per session** (audit REL-03, 2026-11-13). Starting Rollcopy again, which is the normal way back from the tray, used to start a second process that shared the staging and cache files with the first one. Now the first instance holds a `flock` on `~/.local/state/rollcopy/rollcopy.lock` and owns the D-Bus name `io.github.ankurk91.rollcopy-desktop-app` (`org.freedesktop.Application.Activate`). A second launch calls Activate, which brings the first window to the front, then exits. Staging files are named `<pid>-<n>.<ext>` as well, so they never clash.
 - Checked 2026-11-12: Linux Mint Cinnamon has `xapp-sn-watcher` (StatusNotifierWatcher) and the xapp-status applet, and the icon shows in the top panel.
 - Optional desktop notification when a queue finishes, only when Rollcopy isn't the active window (preference, on by default).
 - Notifications also cover pause and resume (including a disconnect pause). They are sent over **one D-Bus connection kept open for the app's lifetime**: Cinnamon deletes an app's notifications as soon as their sender disconnects (`_onNameVanished` in notificationDaemon.js), so a connection per notification played the sound but showed nothing. `ROLLCOPY_DEBUG_NOTIFY=1` sends a test notification at startup.
@@ -346,7 +349,7 @@ A small modal opened from ☰ → About Rollcopy:
 
 ## 9. Icon
 
-- Since 0.6.0: a purple film roll whose strip unrolls into a download arrow, on a light cream-to-lavender rounded square (`packaging/icons/io.github.ankurk91.Rollcopy.svg`), traced from new raster artwork. The tray keeps its own flat glyph (`tray.svg`). From 0.1.1 to 0.5.0: the same idea on a dark purple squircle. It was designed as a raster image for the project and redrawn as a clean SVG, because the raster had no real transparency. Before 0.1.1 it was a Tabler `device-mobile-down` placeholder.
+- Since 0.6.0: a purple film roll whose strip unrolls into a download arrow, on a light cream-to-lavender rounded square (`packaging/icons/io.github.ankurk91.rollcopy-desktop-app.svg`), traced from new raster artwork. The tray keeps its own flat glyph (`tray.svg`). From 0.1.1 to 0.5.0: the same idea on a dark purple squircle. It was designed as a raster image for the project and redrawn as a clean SVG, because the raster had no real transparency. Before 0.1.1 it was a Tabler `device-mobile-down` placeholder.
 - The app icon SVG is used by the `.desktop` file, notifications and the About dialog. The tray draws `tray.svg` at runtime with `resvg` (22/32/48 px, plus a green/blue/red status dot). No build-time PNGs needed.
 
 ## 10. Repo layout (planned)

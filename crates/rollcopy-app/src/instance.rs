@@ -21,7 +21,8 @@ use crate::APP_ID;
 use crate::tray::TrayAction;
 use crate::worker::Event;
 
-const OBJECT_PATH: &str = "/io/github/ankurk91/Rollcopy";
+// The app ID as a D-Bus object path (dashes become underscores).
+const OBJECT_PATH: &str = "/io/github/ankurk91/rollcopy_desktop_app";
 const IFACE: &str = "org.freedesktop.Application";
 
 pub enum Lock {

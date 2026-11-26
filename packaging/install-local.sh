@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Installs Rollcopy for the current user (no sudo) into ~/.local:
 #   ~/.local/bin/rollcopy
-#   ~/.local/share/applications/io.github.ankurk91.Rollcopy.desktop
-#   ~/.local/share/icons/hicolor/scalable/apps/io.github.ankurk91.Rollcopy.svg
+#   ~/.local/share/applications/io.github.ankurk91.rollcopy-desktop-app.desktop
+#   ~/.local/share/icons/hicolor/scalable/apps/io.github.ankurk91.rollcopy-desktop-app.svg
 # Usage: packaging/install-local.sh            build (release) and install
 #        packaging/install-local.sh --uninstall remove those three files
 # The ~/.local copy takes precedence over a .deb install (PATH and menu).
 set -euo pipefail
 
-ID=io.github.ankurk91.Rollcopy
+ID=io.github.ankurk91.rollcopy-desktop-app
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$HOME/.local/bin/rollcopy"
 APPS="$HOME/.local/share/applications"

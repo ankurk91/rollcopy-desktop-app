@@ -100,7 +100,7 @@ Not needed: `--share=network`, `--device=all`, `--talk-name=org.freedesktop.Flat
 ## Releasing to Flathub
 
 These steps assume the Flathub submission is done: the app is on Flathub and
-its packaging lives in `flathub/io.github.ankurk91.Rollcopy`, where the
+its packaging lives in `flathub/io.github.ankurk91.rollcopy-desktop-app`, where the
 maintainer has write access. Each new Rollcopy release is a pull request
 there. Paths below are examples; adjust them to your machine.
 
@@ -109,7 +109,7 @@ there. Paths below are examples; adjust them to your machine.
 ```sh
 mkdir -p ~/projects && cd ~/projects
 # Flathub's packaging repo for Rollcopy
-git clone https://github.com/flathub/io.github.ankurk91.Rollcopy.git
+git clone https://github.com/flathub/io.github.ankurk91.rollcopy-desktop-app.git
 # Flatpak's tools, for generating cargo-sources.json
 git clone https://github.com/flatpak/flatpak-builder-tools.git
 # The builder, its linter and the runtimes
@@ -125,10 +125,10 @@ the Rollcopy app repo (`rollcopy-desktop-app`) next to the others.
 1. Release the app as usual (tag `vX.Y.Z`, metainfo `<releases>` entry; see
    NOTES.md "Build, CI and release"). The manifest reads the metainfo, icon
    and desktop file from that tag.
-2. In `io.github.ankurk91.Rollcopy`, start a branch from the latest `master`:
+2. In `io.github.ankurk91.rollcopy-desktop-app`, start a branch from the latest `master`:
 
    ```sh
-   cd ~/projects/io.github.ankurk91.Rollcopy
+   cd ~/projects/io.github.ankurk91.rollcopy-desktop-app
    git switch master && git pull
    git switch -c update-X.Y.Z
    ```
@@ -160,8 +160,8 @@ the Rollcopy app repo (`rollcopy-desktop-app`) next to the others.
    second lint needs):
 
    ```sh
-   flatpak run --command=flathub-build org.flatpak.Builder --install io.github.ankurk91.Rollcopy.yml
-   flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest io.github.ankurk91.Rollcopy.yml
+   flatpak run --command=flathub-build org.flatpak.Builder --install io.github.ankurk91.rollcopy-desktop-app.yml
+   flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest io.github.ankurk91.rollcopy-desktop-app.yml
    flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo repo
    ```
 
@@ -169,19 +169,19 @@ the Rollcopy app repo (`rollcopy-desktop-app`) next to the others.
 
    ```sh
    # Run the app
-   flatpak run io.github.ankurk91.Rollcopy
+   flatpak run io.github.ankurk91.rollcopy-desktop-app
 
    # Shell inside the sandbox
-   flatpak run --command=sh io.github.ankurk91.Rollcopy
+   flatpak run --command=sh io.github.ankurk91.rollcopy-desktop-app
 
    # Check that ffmpeg is bundled and has the right build options
-   flatpak run --command=ffmpeg io.github.ankurk91.Rollcopy -hide_banner -buildconf | grep -E 'x264|zimg|vaapi'
+   flatpak run --command=ffmpeg io.github.ankurk91.rollcopy-desktop-app -hide_banner -buildconf | grep -E 'x264|zimg|vaapi'
 
    # Log D-Bus traffic (notifications, tray, portals)
-   flatpak run --log-session-bus io.github.ankurk91.Rollcopy
+   flatpak run --log-session-bus io.github.ankurk91.rollcopy-desktop-app
 
    # Show the permissions the app actually got
-   flatpak info --show-permissions io.github.ankurk91.Rollcopy
+   flatpak info --show-permissions io.github.ankurk91.rollcopy-desktop-app
    ```
 
    After changing the manifest, build again with the same command. Either
@@ -189,17 +189,17 @@ the Rollcopy app repo (`rollcopy-desktop-app`) next to the others.
    lint needs:
 
    ```sh
-   flatpak run --command=flathub-build org.flatpak.Builder --install io.github.ankurk91.Rollcopy.yml
+   flatpak run --command=flathub-build org.flatpak.Builder --install io.github.ankurk91.rollcopy-desktop-app.yml
    # or
    flatpak run org.flatpak.Builder --force-clean --user --install \
-     --install-deps-from=flathub builddir io.github.ankurk91.Rollcopy.yml
+     --install-deps-from=flathub builddir io.github.ankurk91.rollcopy-desktop-app.yml
    ```
 
    To remove the local build afterwards (before installing Rollcopy from
    Flathub, which uses the same app ID):
 
    ```sh
-   flatpak uninstall --user io.github.ankurk91.Rollcopy
+   flatpak uninstall --user io.github.ankurk91.rollcopy-desktop-app
    ```
 
    Test with a phone: plugged in after start, re-plugged while running, a
