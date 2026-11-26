@@ -19,7 +19,7 @@ on the way.
 
 ![Rollcopy on Linux Mint in dark mode: a sidebar with the library by year and month, albums, Hidden and Recently Deleted and the phone at the bottom; a thumbnail grid with filter toggles, copied and Live badges and two selected photos; the info pane with photo details; and the finished transfers](.github/screenshot.jpg?v=2)
 
-> **Status:** early (0.6.0). Linux only. Tested on Linux Mint 22 (Cinnamon, X11) with iOS 27, and on
+> **Status:** early (0.7.0). Linux only. Tested on Linux Mint 22 (Cinnamon, X11) with iOS 27, and on
 > Ubuntu 26.04 (GNOME, Wayland) in a virtual machine.
 
 ## Features
@@ -95,14 +95,14 @@ Download the latest `.deb` or `.AppImage` from
 **.deb** (installs `usbmuxd` and `ffmpeg` if needed):
 
 ```sh
-sudo apt install ./rollcopy_0.6.0-1_amd64.deb
+sudo apt install ./rollcopy_0.7.0-1_amd64.deb
 ```
 
 **AppImage** (install `usbmuxd` and `ffmpeg` first, see Requirements):
 
 ```sh
-chmod +x Rollcopy-0.6.0-x86_64.AppImage
-./Rollcopy-0.6.0-x86_64.AppImage
+chmod +x Rollcopy-0.7.0-x86_64.AppImage
+./Rollcopy-0.7.0-x86_64.AppImage
 ```
 
 **From source** for your user only (see [Building from source](#building-from-source)):

@@ -57,6 +57,15 @@
   </branding>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.7.0" date="2026-11-26">
+      <description>
+        <ul>
+          <li>Runs as a Flatpak: the iPhone is found when plugged in at any time, and again after re-plugging</li>
+          <li>In Flatpak, Open and Show in folder use the desktop portals, and no network access is needed</li>
+          <li>Notifications and the single-window check work in sandboxes on Ubuntu 24.04 and Linux Mint 22</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.6.0" date="2026-11-18">
       <description>
         <ul>
