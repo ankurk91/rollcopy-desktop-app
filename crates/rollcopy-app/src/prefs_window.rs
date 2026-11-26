@@ -273,7 +273,9 @@ fn pages() -> Vec<SettingPage> {
                         },
                     ),
                 ))
-                .item(
+                // Flathub updates the Flatpak; the check points at GitHub's
+                // .deb and AppImage, so it's left out there.
+                .items((!crate::flatpak::active()).then(|| {
                     SettingItem::new(
                         "Check for updates on startup",
                         SettingField::switch(
@@ -283,8 +285,8 @@ fn pages() -> Vec<SettingPage> {
                             },
                         ),
                     )
-                    .description("At most once a day. Only shows something when an update exists."),
-                )
+                    .description("At most once a day. Only shows something when an update exists.")
+                }))
                 .item(
                     SettingItem::new(
                         "Keep running in tray while copying",

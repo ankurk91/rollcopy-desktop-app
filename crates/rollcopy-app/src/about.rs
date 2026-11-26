@@ -80,9 +80,14 @@ impl MainView {
             .icon(IconName::Menu)
             .tooltip("Menu")
             .dropdown_menu(|menu, _, _| {
-                menu.menu("Preferences…", Box::new(OpenPreferences))
-                    .menu("Check for Updates…", Box::new(CheckForUpdates))
-                    .separator()
+                let menu = menu.menu("Preferences…", Box::new(OpenPreferences));
+                // Flathub updates the Flatpak itself.
+                let menu = if crate::flatpak::active() {
+                    menu
+                } else {
+                    menu.menu("Check for Updates…", Box::new(CheckForUpdates))
+                };
+                menu.separator()
                     .menu("View on GitHub", Box::new(ViewOnGitHub))
                     .menu("Report an Issue", Box::new(ReportIssue))
                     .separator()
@@ -96,6 +101,10 @@ impl MainView {
     /// Starts an update check. `manual` shows the dialog with every outcome;
     /// the automatic startup check stays silent unless there's an update.
     pub(crate) fn check_for_updates(&mut self, manual: bool, cx: &mut Context<Self>) {
+        // Flathub updates the Flatpak, and the sandbox has no network.
+        if crate::flatpak::active() {
+            return;
+        }
         if manual {
             self.update_ui = Some(UpdateUi::Checking);
             self.about_open = false;
@@ -223,16 +232,18 @@ impl MainView {
                             .label("Report an issue")
                             .on_click(|_, _, cx| cx.open_url(update::ISSUES_URL)),
                     )
-                    .child(
-                        btn("about-updates")
-                            .small()
-                            .outline()
-                            .label("Check for updates")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.check_for_updates(true, cx);
-                                cx.notify();
-                            })),
-                    ),
+                    .when(!crate::flatpak::active(), |d| {
+                        d.child(
+                            btn("about-updates")
+                                .small()
+                                .outline()
+                                .label("Check for updates")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.check_for_updates(true, cx);
+                                    cx.notify();
+                                })),
+                        )
+                    }),
             )
             .child(
                 h_flex()
