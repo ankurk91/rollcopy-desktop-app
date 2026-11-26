@@ -10,11 +10,52 @@ use std::path::Path;
 pub fn show_in_folder(file: &Path) {
     let file = file.to_path_buf();
     std::thread::spawn(move || {
+        if crate::flatpak::active() {
+            // The sandbox can't reach the file manager directly; the
+            // portal opens the folder with the file selected.
+            if let Err(e) = portal_open_directory(&file) {
+                crate::applog!("show in folder: portal failed ({e}); opening the folder");
+                if let Some(dir) = file.parent() {
+                    let _ = std::process::Command::new("xdg-open").arg(dir).status();
+                }
+            }
+            return;
+        }
         let selected = !file_manager_is_nemo() && show_items(&file);
         if !selected && let Some(dir) = file.parent() {
             let _ = std::process::Command::new("xdg-open").arg(dir).status();
         }
     });
+}
+
+/// Asks the desktop portal to show `file` in its folder
+/// (`org.freedesktop.portal.OpenURI.OpenDirectory`). The file is passed as
+/// an open file descriptor, so the portal sees the host's real file, not
+/// the sandbox's view of it.
+fn portal_open_directory(file: &Path) -> Result<(), String> {
+    use std::collections::HashMap;
+    use zbus::zvariant::{Fd, Value};
+    let f = std::fs::File::open(file).map_err(|e| e.to_string())?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    rt.block_on(async {
+        let conn = zbus::Connection::session()
+            .await
+            .map_err(|e| e.to_string())?;
+        let options: HashMap<&str, Value<'_>> = HashMap::new();
+        conn.call_method(
+            Some("org.freedesktop.portal.Desktop"),
+            "/org/freedesktop/portal/desktop",
+            Some("org.freedesktop.portal.OpenURI"),
+            "OpenDirectory",
+            &("", Fd::from(&f), options),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    })
 }
 
 /// Whether the FileManager1 service belongs to Nemo (or nemo-desktop).

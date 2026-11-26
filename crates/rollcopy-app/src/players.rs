@@ -129,6 +129,11 @@ pub(crate) enum Check {
 }
 
 pub(crate) fn check(name: &str) -> Check {
+    // Inside Flatpak the host's apps and codecs can't be seen; the portal
+    // asks the desktop which app to use.
+    if crate::flatpak::active() {
+        return Check::Fine { app: None };
+    }
     let Some(mime) = mime_for(name) else {
         return Check::Fine { app: None };
     };
