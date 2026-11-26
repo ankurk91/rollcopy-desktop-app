@@ -97,6 +97,55 @@ Not needed: `--share=network`, `--device=all`, `--talk-name=org.freedesktop.Flat
 - **Desktop file, icon and metainfo** from `packaging/`. The metainfo passes
   `flatpak-builder-lint appstream`.
 
+## Releasing to Flathub
+
+**First submission** (once): a PR to `flathub/flathub`, branched from its
+`new-pr` branch, titled `Add io.github.ankurk91.Rollcopy`. The local clone is
+`../flathub-fork` (branch `rollcopy-submission`, pushes go to the fork; pushing
+to `upstream` is disabled). After approval Flathub creates the repo
+`flathub/io.github.ankurk91.Rollcopy`, and invites the maintainer (needs
+GitHub 2FA, accept within a week).
+
+**Every release after that** is a PR to `flathub/io.github.ankurk91.Rollcopy`,
+not to `flathub/flathub`:
+
+1. Release the app as usual (tag `vX.Y.Z`, metainfo `<releases>` entry,
+   NOTES.md "Build, CI and release"). The manifest reads the metainfo, icon and
+   desktop file from that tag.
+2. In the manifest, point the Rollcopy source at the new tag and the commit it
+   points to (`git rev-parse vX.Y.Z^{commit}`).
+3. Regenerate `cargo-sources.json` from that tag's `Cargo.lock` (Flathub
+   builds offline, so every crate is listed in advance). Needed whenever
+   `Cargo.lock` changes outside our own crates (Dependabot, `cargo update`, a
+   new dependency); simplest is every release:
+
+   ```sh
+   git -C ../rollcopy-desktop-app show vX.Y.Z:Cargo.lock > /tmp/rollcopy-Cargo.lock
+   uv run --with aiohttp --with tomlkit --with pyyaml \
+     python ../flatpak-builder-tools/cargo/flatpak-cargo-generator.py \
+     /tmp/rollcopy-Cargo.lock -o cargo-sources.json
+   ```
+
+   (`flatpak-builder-tools` is a clone of
+   github.com/flatpak/flatpak-builder-tools; its needs are in
+   `cargo/pyproject.toml`.)
+4. Build, run and lint locally:
+
+   ```sh
+   flatpak run --command=flathub-build org.flatpak.Builder --install io.github.ankurk91.Rollcopy.yml
+   flatpak run io.github.ankurk91.Rollcopy
+   flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest io.github.ankurk91.Rollcopy.yml
+   flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo repo
+   ```
+
+   Don't commit `repo/` or the build folders.
+5. Open the PR. Flathub builds it; merging publishes the update. Also update
+   other bundled sources (libde265, ffmpeg) when they have security fixes.
+
+Flathub's rules: the manifest, its commits, the PR and replies to reviewers
+are the maintainer's own work (no AI-generated or AI-assisted content), and
+AI-generated material in the app is disclosed. See the note at the top.
+
 ## Testing a local build
 
 A throwaway package that wraps a host-built binary (copying the few

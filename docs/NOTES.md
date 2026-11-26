@@ -164,6 +164,8 @@ it like this" details. Keep both up to date. No personal data here (see [AGENTS.
   it, and Dependabot skips libheif-rs on purpose. It decodes HEICs other people sent (WhatsApp,
   AirDrop). If there's a fix, bump libheif-rs and its `v1_xx` feature (review S1). ffmpeg and libde265
   come from the system and get distro updates.
+- Flathub: after each release, update the Flatpak manifest in `flathub/io.github.ankurk91.Rollcopy`
+  (new tag and commit, regenerated `cargo-sources.json`); steps in FLATPAK.md "Releasing to Flathub".
 - AppImage: appimagetool only reads `*.appdata.xml`, so the metainfo is copied under that name.
 - Checking release status: `gh api repos/<owner>/<repo>/releases/tags/<tag>` (a drafts-blind login can
   miss drafts in the list).
