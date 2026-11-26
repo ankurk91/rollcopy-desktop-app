@@ -15,7 +15,7 @@ use std::fs::{File, TryLockError};
 use std::path::Path;
 use std::time::Duration;
 
-use zbus::{OwnedVariant, Variant};
+use zbus::zvariant::{OwnedValue as OwnedVariant, Value as Variant};
 
 use crate::APP_ID;
 use crate::tray::TrayAction;
@@ -102,12 +102,12 @@ impl Application {
 /// Runs on the worker's tokio runtime.
 pub async fn serve(events: async_channel::Sender<Event>) {
     let result = async {
-        let conn = zbus::connection::Builder::session()
-            .serve_at(OBJECT_PATH, Application { events })
+        let conn = zbus::connection::Builder::session()?
+            .serve_at(OBJECT_PATH, Application { events })?
             .build()
             .await?;
         let reply = conn
-            .request_name_with_flags(APP_ID, zbus::fdo::RequestNameFlags::DO_NOT_QUEUE)
+            .request_name_with_flags(APP_ID, zbus::fdo::RequestNameFlags::DoNotQueue.into())
             .await?;
         // Someone else has the name (another Rollcopy, when the lock file
         // couldn't be used): a second launch would show that one instead

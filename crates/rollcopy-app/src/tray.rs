@@ -184,7 +184,14 @@ pub async fn run(
         icons,
         actions,
     };
-    let handle = match tray.spawn().await {
+    // A Flatpak may not own the `StatusNotifierItem-<pid>-<n>` name the
+    // spec asks for (the watcher then answers "ServiceUnknown"); ksni can
+    // register without it, as Chromium does in sandboxes.
+    let handle = match tray
+        .disable_dbus_name(crate::flatpak::active())
+        .spawn()
+        .await
+    {
         Ok(h) => h,
         Err(e) => {
             crate::applog!("tray unavailable: {e}");

@@ -53,7 +53,15 @@ pub(crate) fn render_guide(phase: &Phase, cx: &mut Context<MainView>) -> AnyElem
         Phase::NoDevice { hint: None } => guide(
             IconName::Plug,
             "Plug in your iPhone with a cable",
-            "Use a cable that carries data, connected straight to this computer.".into(),
+            if crate::flatpak::active() {
+                // The sandbox can't see whether usbmuxd is installed.
+                format!(
+                    "Use a cable that carries data, connected straight to this computer. \
+                     Rollcopy also needs usbmuxd installed on this computer: {INSTALL_USBMUXD}"
+                )
+            } else {
+                "Use a cable that carries data, connected straight to this computer.".into()
+            },
             false,
             cx,
         ),

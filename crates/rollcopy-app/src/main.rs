@@ -6,6 +6,7 @@ mod config;
 mod desktop;
 mod events;
 mod filters;
+mod flatpak;
 mod grid;
 mod guide;
 mod icons;
@@ -157,6 +158,10 @@ fn app_paths() -> worker::CachePaths {
 }
 
 fn main() {
+    // A Flatpak relay helper started by the app (see `flatpak.rs`).
+    if flatpak::run_relay_if_asked() {
+        return;
+    }
     let paths = app_paths();
     log::init(&paths::app_dirs().log());
     applog!("Rollcopy {} starting", update::current_version());
@@ -172,6 +177,8 @@ fn main() {
         instance::Lock::Acquired(f) => Some(f),
         instance::Lock::Unavailable => None,
     };
+    // Before any phone access; held until exit.
+    let _relay = flatpak::start_relay();
     let worker = worker::spawn(paths.clone());
     let paths_at_exit = paths.clone();
 

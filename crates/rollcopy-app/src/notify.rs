@@ -10,7 +10,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use zbus::Variant;
+use zbus::zvariant::Value as Variant;
 
 use crate::tray::TrayAction;
 use crate::worker::Event;
@@ -119,12 +119,16 @@ async fn listen_for_clicks(
     events: async_channel::Sender<Event>,
 ) {
     use futures_lite::StreamExt as _;
-    let Ok(rule) = zbus::MatchRule::builder()
-        .msg_type(zbus::message::Type::Signal)
-        .interface("org.freedesktop.Notifications")
-        .member("ActionInvoked")
-        .build()
-    else {
+    let rule = (|| {
+        Ok::<_, zbus::Error>(
+            zbus::MatchRule::builder()
+                .msg_type(zbus::message::Type::Signal)
+                .interface("org.freedesktop.Notifications")?
+                .member("ActionInvoked")?
+                .build(),
+        )
+    })();
+    let Ok(rule) = rule else {
         return;
     };
     let mut stream = match zbus::MessageStream::for_match_rule(rule, &conn, None).await {
