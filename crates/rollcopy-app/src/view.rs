@@ -491,9 +491,9 @@ impl MainView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Esc cancels the Copy all prompt, then closes the viewer.
-        if self.copy_all_prompt {
-            self.copy_all_prompt = false;
+        // Esc closes the dialog on top (same as its Close / Cancel / Keep
+        // copying button), then the viewer, then clears the selection.
+        if self.close_top_dialog(cx) {
             cx.notify();
             return;
         }
@@ -505,6 +505,28 @@ impl MainView {
         self.selected.clear();
         self.anchor = None;
         cx.notify();
+    }
+
+    /// Closes the topmost open dialog, in the order they're drawn (last
+    /// drawn is on top). The quit prompt closes as "Keep copying", the safe
+    /// choice. `false` if none was open.
+    fn close_top_dialog(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.copy_all_prompt {
+            self.copy_all_prompt = false;
+        } else if self.quit_prompt {
+            self.quit_prompt = false;
+        } else if self.update_ui.is_some() {
+            self.update_ui = None;
+        } else if self.welcome_open {
+            self.close_welcome(cx);
+        } else if self.shortcuts_open {
+            self.shortcuts_open = false;
+        } else if self.about_open {
+            self.about_open = false;
+        } else {
+            return false;
+        }
+        true
     }
 
     pub(crate) fn key_move(&mut self, delta: isize, extend: bool, cx: &mut Context<Self>) {

@@ -4,6 +4,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -40,7 +41,10 @@ pub(crate) const SHORTCUTS: &[(&str, &str)] = &[
         "Select / add to / extend the selection",
     ),
     ("Ctrl+A", "Select all items shown"),
-    ("Esc", "Clear the selection, or close the viewer"),
+    (
+        "Esc",
+        "Close a dialog or the viewer, or clear the selection",
+    ),
     (
         "Space / Enter / double-click",
         "View the item full-window (videos: open the player)",
@@ -316,8 +320,12 @@ impl MainView {
             return None;
         }
         let theme = cx.theme().clone();
+        // At most 90% of the window either way; long descriptions wrap and
+        // the list scrolls in a small window.
         let card = v_flex()
-            .w(px(520.))
+            .w(px(560.))
+            .max_w(relative(0.9))
+            .max_h(relative(0.9))
             .p_5()
             .gap_3()
             .rounded_lg()
@@ -327,25 +335,37 @@ impl MainView {
             .shadow_lg()
             .child(
                 div()
+                    .flex_shrink_0()
                     .text_lg()
                     .font_weight(FontWeight::SEMIBOLD)
                     .child("Keyboard shortcuts"),
             )
             .child(
                 v_flex()
-                    .gap_1()
+                    .id("shortcuts-list")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .gap_1p5()
                     .text_sm()
                     .children(SHORTCUTS.iter().map(|(keys, what)| {
                         h_flex()
                             .gap_3()
+                            .items_start()
                             .child(
                                 div()
-                                    .w(px(220.))
+                                    .w(px(190.))
                                     .flex_shrink_0()
                                     .font_family("monospace")
                                     .child(*keys),
                             )
-                            .child(div().text_color(theme.muted_foreground).child(*what))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_color(theme.muted_foreground)
+                                    .child(*what),
+                            )
                     })),
             )
             .child(
