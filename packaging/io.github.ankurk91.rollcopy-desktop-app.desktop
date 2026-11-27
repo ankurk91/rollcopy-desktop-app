@@ -7,6 +7,6 @@ Exec=rollcopy
 Icon=io.github.ankurk91.rollcopy-desktop-app
 Terminal=false
 Categories=Graphics;Photography;
-Keywords=iPhone;iPad;photos;videos;HEIC;import;copy;
+Keywords=iPhone;iPad;iTunes;photos;videos;transfer;backup;import;copy;camera roll;HEIC;JPG;MP4;USB;
 StartupNotify=true
 StartupWMClass=io.github.ankurk91.rollcopy-desktop-app

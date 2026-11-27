@@ -12,9 +12,15 @@
   </developer>
   <description>
     <p>
-      Plug in your iPhone, pick photos and videos, and get files that open
-      everywhere: HEIC becomes JPG and MOV becomes MP4 (lossless), arranged
-      by the date each item was taken.
+      Transfer photos and videos from your iPhone or iPad to Linux over a USB
+      cable, without iTunes, iCloud or an Apple account. Plug in the phone, pick
+      what you want, and get files that open everywhere: HEIC becomes JPG and
+      MOV becomes MP4 (lossless), arranged by the date each item was taken.
+    </p>
+    <p>
+      Use it to back up your camera roll to your computer, free up space before
+      deleting photos on the phone yourself, or move pictures to an Android
+      phone, a PC or a TV.
     </p>
     <ul>
       <li>Browse the library by year, month or album, with thumbnails, search and filters</li>
@@ -35,21 +41,35 @@
   <url type="homepage">https://github.com/ankurk91/rollcopy-desktop-app</url>
   <url type="bugtracker">https://github.com/ankurk91/rollcopy-desktop-app/issues</url>
   <url type="vcs-browser">https://github.com/ankurk91/rollcopy-desktop-app</url>
+  <!-- The README's Help section links to docs/FAQ.md and docs/TROUBLESHOOTING.md.
+       (GitHub's file pages answer bots with 503, which fails Flathub's URL check.) -->
+  <url type="faq">https://github.com/ankurk91/rollcopy-desktop-app#help</url>
   <screenshots>
     <screenshot type="default">
       <caption>The library by year and month, with filters and the info pane</caption>
-      <image>https://raw.githubusercontent.com/ankurk91/rollcopy-desktop-app/v0.6.0/.github/screenshot.jpg</image>
+      <image>https://raw.githubusercontent.com/ankurk91/rollcopy-desktop-app/v0.7.1/.github/screenshot.jpg</image>
     </screenshot>
   </screenshots>
   <categories>
     <category>Graphics</category>
     <category>Photography</category>
+    <category>Utility</category>
+    <category>Archiving</category>
   </categories>
   <keywords>
     <keyword>iPhone</keyword>
-    <keyword>HEIC</keyword>
+    <keyword>iPad</keyword>
+    <keyword>iTunes</keyword>
     <keyword>photos</keyword>
+    <keyword>videos</keyword>
+    <keyword>transfer</keyword>
+    <keyword>backup</keyword>
     <keyword>import</keyword>
+    <keyword>camera roll</keyword>
+    <keyword>HEIC</keyword>
+    <keyword>JPG</keyword>
+    <keyword>MP4</keyword>
+    <keyword>USB</keyword>
   </keywords>
   <branding>
     <color type="primary" scheme_preference="light">#dcd2f5</color>
