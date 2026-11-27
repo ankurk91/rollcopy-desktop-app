@@ -2,7 +2,7 @@
 
 > Plug in your iPhone, pick photos and videos, and get Android/PC-friendly files on your laptop.
 
-Status: **v0.7.1 (2026-11-26). M0–M7 done**: Check for updates finds the release. Backlog for 0.1.x in §15.
+Status: **v0.7.2 (2026-11-27). M0–M7 done**: Check for updates finds the release. Backlog for 0.1.x in §15.
 
 ---
 

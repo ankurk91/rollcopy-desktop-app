@@ -47,7 +47,7 @@
   <screenshots>
     <screenshot type="default">
       <caption>The library by year and month, with filters and the info pane</caption>
-      <image>https://raw.githubusercontent.com/ankurk91/rollcopy-desktop-app/v0.7.1/.github/screenshot.jpg</image>
+      <image>https://raw.githubusercontent.com/ankurk91/rollcopy-desktop-app/v0.7.2/.github/screenshot.jpg</image>
     </screenshot>
   </screenshots>
   <categories>
@@ -77,6 +77,15 @@
   </branding>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.7.2" date="2026-11-27">
+      <description>
+        <ul>
+          <li>In Flatpak, notifications go through the desktop portal</li>
+          <li>Esc closes dialogs; the keyboard shortcuts list fits small windows</li>
+          <li>Clearer software-centre description, with a link to the FAQ</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.1" date="2026-11-26">
       <description>
         <p>New app ID, io.github.ankurk91.rollcopy-desktop-app, matching the project's repository, as Flathub requires. Settings are kept.</p>
