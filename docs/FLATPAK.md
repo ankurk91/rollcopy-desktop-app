@@ -57,6 +57,11 @@ sandbox can't check, so the "plug in" screen mentions it.
 - **Open:** `xdg-open` inside the runtime goes through the OpenURI portal,
   which asks which app to use. The player check (`xdg-mime`, GStreamer
   plugins) is skipped; the sandbox can't see the host's apps.
+- **Notifications:** sent through the notification portal
+  (`org.freedesktop.portal.Notification`), so no `--talk-name` for the
+  notification service is needed; Flathub's reviewers asked for this. Clicks
+  come back as the portal's `ActionInvoked`. Outside Flatpak they still go to
+  `org.freedesktop.Notifications` directly.
 - **Show in folder:** the OpenURI portal's `OpenDirectory`, with the file as
   an fd, instead of `FileManager1` over `dbus-send`.
 - **Updates:** "Check for updates" is hidden; Flathub updates the app, and
@@ -76,7 +81,6 @@ sandbox can't check, so the "plug in" screen mentions it.
 | `--share=ipc`, `--socket=x11`, `--socket=wayland`, `--device=dri` | The window (gpui renders with Vulkan/GL) |
 | `--filesystem=/run/usbmuxd` | The phone, through the relay (above) |
 | `--filesystem=xdg-pictures` | The default destination, `~/Pictures/Rollcopy`; other folders come through the folder picker portal |
-| `--talk-name=org.freedesktop.Notifications` | "Copies finished" notifications |
 | `--talk-name=org.kde.StatusNotifierWatcher` | The tray icon while copying |
 
 Not needed: `--share=network`, `--device=all`, `--talk-name=org.freedesktop.Flatpak`

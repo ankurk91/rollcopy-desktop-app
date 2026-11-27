@@ -1,4 +1,6 @@
-//! Desktop notifications (PLAN §6) through org.freedesktop.Notifications.
+//! Desktop notifications (PLAN §6) through org.freedesktop.Notifications,
+//! or, inside Flatpak, the notification portal (Flathub asks sandboxed apps
+//! not to talk to the notification service directly).
 //!
 //! Sent from the worker's tokio runtime over **one D-Bus connection kept
 //! open for the app's lifetime**. Cinnamon destroys an app's notifications as
@@ -68,36 +70,24 @@ pub fn start(events: async_channel::Sender<Event>) {
             }
         };
         // Notification id → what a click on it does (the last few only).
-        let clicks: Arc<Mutex<VecDeque<(u32, OnClick)>>> = Arc::default();
-        tokio::spawn(listen_for_clicks(conn.clone(), clicks.clone(), events));
+        let clicks: Clicks = Arc::default();
+        let portal = crate::flatpak::active();
+        tokio::spawn(listen_for_clicks(
+            conn.clone(),
+            clicks.clone(),
+            events,
+            portal,
+        ));
+        let mut next = 0u32;
         while let Ok(note) = rx.recv().await {
-            let hints: HashMap<&str, Variant<'_>> =
-                HashMap::from([("desktop-entry", Variant::from(crate::APP_ID))]);
-            // "default" is what clicking the notification itself triggers.
-            let label = match note.click {
-                OnClick::ShowWindow => "Show Rollcopy",
-                OnClick::OpenFolder(_) => "Open folder",
+            let sent = if portal {
+                next += 1;
+                let id = format!("rollcopy-{next}");
+                send_portal(&conn, &id, &note).await.map(|()| id)
+            } else {
+                send_direct(&conn, &note).await.map(|id| id.to_string())
             };
-            let args = (
-                "Rollcopy",
-                0u32,
-                crate::APP_ID,
-                note.summary.as_str(),
-                note.body.as_str(),
-                vec!["default", label],
-                hints,
-                EXPIRE_MS,
-            );
-            let reply = conn
-                .call_method(
-                    Some("org.freedesktop.Notifications"),
-                    "/org/freedesktop/Notifications",
-                    Some("org.freedesktop.Notifications"),
-                    "Notify",
-                    &args,
-                )
-                .await;
-            match reply.and_then(|m| m.body().deserialize::<u32>()) {
+            match sent {
                 Ok(id) => {
                     let mut c = clicks.lock().unwrap_or_else(|e| e.into_inner());
                     c.push_back((id, note.click));
@@ -112,18 +102,79 @@ pub fn start(events: async_channel::Sender<Event>) {
     });
 }
 
-/// Acts on `ActionInvoked` for our notifications.
+/// Recent notification ids and what a click on each does.
+type Clicks = Arc<Mutex<VecDeque<(String, OnClick)>>>;
+
+/// `org.freedesktop.Notifications.Notify`; returns the server's id.
+async fn send_direct(conn: &zbus::Connection, note: &Note) -> zbus::Result<u32> {
+    let hints: HashMap<&str, Variant<'_>> =
+        HashMap::from([("desktop-entry", Variant::from(crate::APP_ID))]);
+    // "default" is what clicking the notification itself triggers.
+    let label = match note.click {
+        OnClick::ShowWindow => "Show Rollcopy",
+        OnClick::OpenFolder(_) => "Open folder",
+    };
+    let args = (
+        "Rollcopy",
+        0u32,
+        crate::APP_ID,
+        note.summary.as_str(),
+        note.body.as_str(),
+        vec!["default", label],
+        hints,
+        EXPIRE_MS,
+    );
+    conn.call_method(
+        Some("org.freedesktop.Notifications"),
+        "/org/freedesktop/Notifications",
+        Some("org.freedesktop.Notifications"),
+        "Notify",
+        &args,
+    )
+    .await?
+    .body()
+    .deserialize::<u32>()
+}
+
+/// `org.freedesktop.portal.Notification.AddNotification` under our own
+/// `id`. The portal knows the app (and its icon) from the sandbox; a click
+/// comes back as `ActionInvoked` with the "default" action.
+async fn send_portal(conn: &zbus::Connection, id: &str, note: &Note) -> zbus::Result<()> {
+    let notification: HashMap<&str, Variant<'_>> = HashMap::from([
+        ("title", Variant::from(note.summary.as_str())),
+        ("body", Variant::from(note.body.as_str())),
+        ("default-action", Variant::from("default")),
+    ]);
+    conn.call_method(
+        Some("org.freedesktop.portal.Desktop"),
+        "/org/freedesktop/portal/desktop",
+        Some("org.freedesktop.portal.Notification"),
+        "AddNotification",
+        &(id, notification),
+    )
+    .await
+    .map(|_| ())
+}
+
+/// Acts on `ActionInvoked` for our notifications, from the notification
+/// service or, with `portal`, the notification portal.
 async fn listen_for_clicks(
     conn: zbus::Connection,
-    clicks: Arc<Mutex<VecDeque<(u32, OnClick)>>>,
+    clicks: Clicks,
     events: async_channel::Sender<Event>,
+    portal: bool,
 ) {
     use futures_lite::StreamExt as _;
+    let interface = if portal {
+        "org.freedesktop.portal.Notification"
+    } else {
+        "org.freedesktop.Notifications"
+    };
     let rule = (|| {
         Ok::<_, zbus::Error>(
             zbus::MatchRule::builder()
                 .msg_type(zbus::message::Type::Signal)
-                .interface("org.freedesktop.Notifications")?
+                .interface(interface)?
                 .member("ActionInvoked")?
                 .build(),
         )
@@ -139,7 +190,16 @@ async fn listen_for_clicks(
         }
     };
     while let Some(Ok(msg)) = stream.next().await {
-        let Ok((id, _action)) = msg.body().deserialize::<(u32, String)>() else {
+        // The service sends (u id, s action); the portal (s id, s action, av).
+        let body = msg.body();
+        let id = if portal {
+            body.deserialize::<(String, String, Vec<zbus::zvariant::OwnedValue>)>()
+                .map(|(id, _, _)| id)
+        } else {
+            body.deserialize::<(u32, String)>()
+                .map(|(id, _)| id.to_string())
+        };
+        let Ok(id) = id else {
             continue;
         };
         let click = {
